@@ -1,0 +1,261 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom'; // Needed to reset view on New Project
+import { useProject } from '../context/ProjectContext';
+import CompileModal from './CompileModal';
+import CustomModal from './CustomModal'; // <--- We need the modal for New/Save As
+
+// --- DEFAULT EMPTY STATE ---
+const EMPTY_PROJECT = {
+  title: "Untitled Project",
+  manuscript: {
+    chapters: [
+      { id: 1, title: "Chapter 1", content: "<p>Once upon a time...</p>" }
+    ]
+  },
+  lore: {
+    characters: [],
+    folders: [
+      { id: 'root_char', name: 'Characters', parentId: null, isOpen: true },
+      { id: 'root_loc', name: 'Locations', parentId: null, isOpen: true },
+      { id: 'root_misc', name: 'Unsorted', parentId: null, isOpen: true },
+    ]
+  },
+  worldMap: { imageSrc: null, pins: [] }
+};
+
+const MenuBar = ({ toggleTheme, isZenMode, toggleZenMode }) => {
+  const { projectData, setProjectData } = useProject();
+  const navigate = useNavigate();
+  
+  // --- STATE ---
+  const [activeMenu, setActiveMenu] = useState(null);
+  const [showCompile, setShowCompile] = useState(false);
+  
+  // Modal State for New/Save As
+  const [modal, setModal] = useState({ isOpen: false, type: 'confirm', title: '', message: '', onConfirm: () => {} });
+  const closeModal = () => setModal({ ...modal, isOpen: false });
+
+  const menuRef = useRef(null);
+
+  // Close menus when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (menuRef.current && !menuRef.current.contains(event.target)) {
+        setActiveMenu(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // --- FILE ACTIONS ---
+
+  // 1. NEW PROJECT
+  const handleNewProject = () => {
+    setActiveMenu(null);
+    setModal({
+      isOpen: true,
+      type: 'confirm',
+      title: 'Create New Project?',
+      message: '⚠️ Warning: Any unsaved changes to the current project will be lost. Make sure to Save first.',
+      onConfirm: () => {
+        setProjectData(EMPTY_PROJECT); // Reset Data
+        navigate('/'); // Go to dashboard
+        closeModal();
+      }
+    });
+  };
+
+  // 2. SAVE (Quick)
+  const handleSave = () => {
+    downloadProject(projectData, projectData.title || 'project');
+    setActiveMenu(null);
+  };
+
+  // 3. SAVE AS (Rename & Save)
+  const handleSaveAs = () => {
+    setActiveMenu(null);
+    setModal({
+      isOpen: true,
+      type: 'input',
+      title: 'Save Project As...',
+      message: 'Enter a name for this version:',
+      defaultValue: projectData.title || 'New Project',
+      onConfirm: (newName) => {
+        // Update title in state first
+        const newData = { ...projectData, title: newName };
+        setProjectData(newData);
+        // Then download
+        downloadProject(newData, newName);
+        closeModal();
+      }
+    });
+  };
+
+  // Helper: Actual download logic
+  const downloadProject = (data, filename) => {
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(data));
+    const downloadAnchorNode = document.createElement('a');
+    downloadAnchorNode.setAttribute("href", dataStr);
+    downloadAnchorNode.setAttribute("download", `${filename}.json`);
+    document.body.appendChild(downloadAnchorNode);
+    downloadAnchorNode.click();
+    downloadAnchorNode.remove();
+  };
+
+  // 4. LOAD
+  const handleLoad = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const json = JSON.parse(e.target.result);
+        setProjectData(json);
+        alert("Project Loaded Successfully!");
+        navigate('/'); // Go home after load
+      } catch (err) {
+        alert("Failed to load project file. It might be corrupted.");
+      }
+    };
+    reader.readAsText(file);
+    setActiveMenu(null);
+  };
+
+  // --- RENDER HELPERS ---
+  const Menu = ({ label, name, children }) => (
+    <div style={{ position: 'relative' }}>
+      <div 
+        onClick={() => setActiveMenu(activeMenu === name ? null : name)}
+        style={{ ...menuItemStyle, background: activeMenu === name ? 'rgba(255,255,255,0.1)' : 'transparent' }}
+      >
+        {label}
+      </div>
+      {activeMenu === name && (
+        <div style={dropdownStyle}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <>
+      {/* GLOBAL MODALS */}
+      <CompileModal isOpen={showCompile} onClose={() => setShowCompile(false)} />
+      
+      <CustomModal 
+        isOpen={modal.isOpen}
+        type={modal.type}
+        title={modal.title}
+        message={modal.message}
+        defaultValue={modal.defaultValue}
+        onConfirm={modal.onConfirm}
+        onCancel={closeModal}
+      />
+
+      <div ref={menuRef} style={barStyle}>
+        {/* APP TITLE / LOGO */}
+        <div style={{ fontWeight: 'bold', marginRight: '20px', color: 'var(--accent)', letterSpacing: '1px' }}>
+          SEYMOUR
+          {/* Show current project title if available */}
+          {projectData.title && <span style={{fontWeight: 'normal', color: '#666', fontSize: '12px', marginLeft: '10px'}}>— {projectData.title}</span>}
+        </div>
+
+        {/* MENUS */}
+        <div style={{ display: 'flex' }}>
+          
+          <Menu label="File" name="file">
+            <button style={dropdownItemStyle} onClick={handleNewProject}>📄 New Project</button>
+            <div style={{height: 1, background: '#444', margin: '5px 0'}}></div>
+            
+            <label style={dropdownItemStyle}>
+              📂 Load Project...
+              <input type="file" accept=".json" onChange={handleLoad} style={{ display: 'none' }} />
+            </label>
+            
+            <div style={{height: 1, background: '#444', margin: '5px 0'}}></div>
+            <button style={dropdownItemStyle} onClick={handleSave}>💾 Save</button>
+            <button style={dropdownItemStyle} onClick={handleSaveAs}>💾 Save As...</button>
+            
+            <div style={{height: 1, background: '#444', margin: '5px 0'}}></div>
+            <button style={dropdownItemStyle} onClick={() => { setShowCompile(true); setActiveMenu(null); }}>
+               🖨️ Compile Manuscript...
+            </button>
+          </Menu>
+
+          <Menu label="View" name="view">
+            <button style={dropdownItemStyle} onClick={toggleTheme}>
+               🌗 Toggle Theme
+            </button>
+            <button style={dropdownItemStyle} onClick={toggleZenMode}>
+               {isZenMode ? 'Show Sidebars' : 'Zen Mode (Hide Sidebars)'}
+            </button>
+          </Menu>
+
+          <Menu label="Help" name="help">
+            <button style={dropdownItemStyle} onClick={() => alert("Seymour v4.0\n\nThe Ultimate World Building Tool.")}>
+               About Seymour
+            </button>
+          </Menu>
+
+        </div>
+      </div>
+    </>
+  );
+};
+
+// --- STYLES ---
+const barStyle = {
+  height: '35px',
+  background: '#1a1a1a', 
+  borderBottom: '1px solid #333',
+  display: 'flex',
+  alignItems: 'center',
+  padding: '0 15px',
+  fontSize: '13px',
+  color: '#ccc',
+  userSelect: 'none',
+  zIndex: 2000 
+};
+
+const menuItemStyle = {
+  padding: '4px 10px',
+  cursor: 'pointer',
+  borderRadius: '4px',
+  marginRight: '5px'
+};
+
+const dropdownStyle = {
+  position: 'absolute',
+  top: '100%',
+  left: 0,
+  background: '#252525',
+  border: '1px solid #444',
+  borderRadius: '4px',
+  padding: '5px 0',
+  minWidth: '180px',
+  boxShadow: '0 10px 20px rgba(0,0,0,0.5)',
+  zIndex: 2001
+};
+
+const dropdownItemStyle = {
+  display: 'block',
+  width: '100%',
+  padding: '8px 15px',
+  textAlign: 'left',
+  background: 'transparent',
+  border: 'none',
+  color: '#eee',
+  cursor: 'pointer',
+  fontSize: '12px',
+  textDecoration: 'none'
+};
+
+const styleTag = document.createElement("style");
+styleTag.innerHTML = `
+  button:hover { background-color: rgba(255,255,255,0.1) !important; }
+`;
+document.head.appendChild(styleTag);
+
+export default MenuBar;

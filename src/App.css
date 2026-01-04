@@ -1,0 +1,133 @@
+:root {
+  /* DARK MODE (Default) */
+  --bg-app: #2d2d2d;
+  --bg-panel: #363636;
+  --bg-header: #404040;
+  --border: #1a1a1a;
+  --text-main: #e0e0e0;
+  --text-muted: #a0a0a0;
+  --paper: #252525;
+  --accent: #5c8bd6; 
+}
+
+[data-theme='light'] {
+  /* LIGHT MODE */
+  --bg-app: #f0f0f0;
+  --bg-panel: #e5e5e5;
+  --bg-header: #dcdcdc;
+  --border: #cccccc;
+  --text-main: #333333;
+  --text-muted: #666666;
+  --paper: #ffffff;
+  --accent: #3b6db0;
+}
+
+body {
+  margin: 0;
+  background-color: var(--bg-app);
+  color: var(--text-main);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  overflow: hidden;
+  font-size: 13px;
+}
+
+button { cursor: pointer; }
+.scrivener-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: 4px;
+  padding: 2px 8px;
+}
+.scrivener-btn:hover { background: var(--bg-header); color: var(--text-main); }
+
+/* --- EDITOR STYLES --- */
+.seymour-editor {
+  outline: none;
+}
+
+.seymour-editor p {
+  /* 1. NATURAL FLOW & SHIFT+ENTER */
+  /* This controls the space between lines when you just keep typing. */
+  /* Shift+Enter respects this exact same value. */
+  line-height: 1.4 !important; 
+
+  /* 2. THE ENTER KEY GAP */
+  /* margin-top: 0 ensures we don't double up on space. */
+  margin-top: 0 !important;
+  
+  /* This is the "Slightly Larger" gap. */
+  /* 0.6em is about half the height of a letter. */
+  /* It creates a subtle visual break without looking like a huge hole. */
+  margin-bottom: 0.6em !important; 
+}
+
+/* HEADINGS */
+.seymour-editor h1, 
+.seymour-editor h2 {
+  color: var(--text-main);
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+  line-height: 1.2;
+}
+
+/* LISTS */
+.seymour-editor ul, 
+.seymour-editor ol {
+  padding-left: 20px;
+  /* Make lists sit tight, similar to paragraphs */
+  margin: 0.6em 0;
+}
+
+/* --- SMART LINKS --- */
+.lore-link {
+  color: var(--accent); /* Blue */
+  text-decoration: underline;
+  text-decoration-style: dotted; /* Dotted line looks more "magical" */
+  cursor: help; /* Shows a question mark or pointer on hover */
+  font-weight: 600;
+  background-color: rgba(92, 139, 214, 0.1); /* Subtle blue highlight */
+  padding: 0 2px;
+  border-radius: 3px;
+  transition: all 0.2s;
+}
+
+.lore-link:hover {
+  background-color: rgba(92, 139, 214, 0.3);
+  color: white;
+}
+
+/* --- OMNIBUS --- */
+.omnibus-item:hover {
+  background-color: var(--bg-header);
+}
+
+/* --- CUSTOM SCROLLBARS --- */
+
+/* 1. The Width/Height of the scrollbar */
+::-webkit-scrollbar {
+  width: 6px;  /* Very thin vertical */
+  height: 6px; /* Very thin horizontal */
+}
+
+/* 2. The Track (Background) */
+::-webkit-scrollbar-track {
+  background: transparent; /* Invisible background */
+}
+
+/* 3. The Thumb (The moving part) */
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15); /* Subtle grey */
+  border-radius: 3px; /* Rounded corners */
+}
+
+/* 4. Hover State */
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3); /* Brighter when grabbing */
+  cursor: grab;
+}
+
+/* 5. Corner (Where horizontal meets vertical) */
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
