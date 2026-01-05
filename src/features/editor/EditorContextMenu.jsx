@@ -25,46 +25,38 @@ const EditorContextMenu = ({ editor, position, onClose }) => {
 
     // Fetch synonyms if single word is selected
     if (text && text.trim().split(/\s+/).length === 1) {
-      const apiKey = localStorage.getItem('mw_thesaurus_key');
-      
-      if (!apiKey) {
-        setSynonyms([]);
-        return;
-      }
-
       setLoadingSynonyms(true);
       const word = text.trim().toLowerCase();
       
-      fetch(`https://www.dictionaryapi.com/api/v3/references/thesaurus/json/${encodeURIComponent(word)}?key=${apiKey}`)
-        .then(res => res.json())
-        .then(data => {
-          if (!Array.isArray(data) || data.length === 0) {
-            setSynonyms([]);
-            return;
-          }
-
-          // Handle "word not found" response (array of strings instead of objects)
-          if (typeof data[0] === 'string') {
-            setSynonyms([]);
-            return;
-          }
-
-          // Extract synonyms from the first entry
-          const entry = data[0];
-          const allSyns = [];
+      // Query multiple Datamuse endpoints for better results
+      Promise.all([
+        fetch(`https://api.datamuse.com/words?rel_syn=${encodeURIComponent(word)}&max=15`).then(r => r.json()),
+        fetch(`https://api.datamuse.com/words?ml=${encodeURIComponent(word)}&max=15`).then(r => r.json()),
+      ])
+        .then(([synonyms, meansLike]) => {
+          // Combine and score results
+          const wordScores = new Map();
           
-          if (entry.meta && entry.meta.syns && Array.isArray(entry.meta.syns)) {
-            // meta.syns is an array of arrays (grouped by sense)
-            entry.meta.syns.forEach(synGroup => {
-              if (Array.isArray(synGroup)) {
-                allSyns.push(...synGroup);
-              }
-            });
-          }
+          // Synonyms get higher priority
+          synonyms.forEach((item, idx) => {
+            const score = (synonyms.length - idx) * 2 + (item.score || 0);
+            wordScores.set(item.word, (wordScores.get(item.word) || 0) + score);
+          });
           
-          // Remove duplicates and limit to 8
-          const uniqueSyns = [...new Set(allSyns)].slice(0, 8);
-          setSynonyms(uniqueSyns);
+          // "Means like" adds to score
+          meansLike.forEach((item, idx) => {
+            const score = (meansLike.length - idx) + (item.score || 0);
+            wordScores.set(item.word, (wordScores.get(item.word) || 0) + score);
+          });
+          
+          // Sort by score and take top 8
+          const topSynonyms = Array.from(wordScores.entries())
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 8)
+            .map(([word]) => word)
+            .filter(w => w.toLowerCase() !== word); // Exclude the original word
+          
+          setSynonyms(topSynonyms);
         })
         .catch(err => {
           console.error('Failed to fetch synonyms:', err);
@@ -140,19 +132,6 @@ const EditorContextMenu = ({ editor, position, onClose }) => {
     onClose();
   };
 
-  const hasApiKey = () => {
-    return localStorage.getItem('mw_thesaurus_key') !== null;
-  };
-
-  const handleSetApiKey = () => {
-    const key = prompt('Enter your Merriam-Webster Thesaurus API key:\n\n(Get one free at: dictionaryapi.com)');
-    if (key && key.trim()) {
-      localStorage.setItem('mw_thesaurus_key', key.trim());
-      alert('API key saved! Right-click again to use the thesaurus.');
-      onClose();
-    }
-  };
-
   if (!position) return null;
 
   return (
@@ -178,11 +157,7 @@ const EditorContextMenu = ({ editor, position, onClose }) => {
           <>
             <div style={dividerStyle}></div>
             <div style={sectionStyle}>✨ Synonyms for "{selectedText.slice(0, 15)}{selectedText.length > 15 ? '...' : ''}"</div>
-            {!hasApiKey() ? (
-              <button onClick={handleSetApiKey} style={{ ...itemStyle, color: 'var(--accent)' }}>
-                🔑 Set API Key (Free at dictionaryapi.com)
-              </button>
-            ) : loadingSynonyms ? (
+            {loadingSynonyms ? (
               <div style={{ ...itemStyle, cursor: 'default', opacity: 0.6 }}>Loading...</div>
             ) : synonyms.length > 0 ? (
               synonyms.map((syn, idx) => (
