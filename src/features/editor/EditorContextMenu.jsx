@@ -11,6 +11,9 @@ const EditorContextMenu = ({ editor, position, onClose }) => {
   const [modalMode, setModalMode] = useState(null); // 'create' or 'addTo'
   const [selectedText, setSelectedText] = useState('');
   const [suggestedType, setSuggestedType] = useState('Character');
+  const [grammarSuggestion, setGrammarSuggestion] = useState(null);
+  const [spellSuggestions, setSpellSuggestions] = useState([]);
+  const [checkingSpelling, setCheckingSpelling] = useState(false);
 
   useEffect(() => {
     if (!editor) return;
@@ -20,7 +23,21 @@ const EditorContextMenu = ({ editor, position, onClose }) => {
     
     // Smart type detection
     setSuggestedType(detectType(text));
-  }, [editor]);
+
+    // Check if we clicked on a grammar error
+    if (window.grammarSuggestion) {
+      setGrammarSuggestion(window.grammarSuggestion);
+    } else {
+      setGrammarSuggestion(null);
+    }
+
+    // Get spell check results that were pre-loaded
+    if (window.spellCheckWord && window.spellCheckWord.suggestions) {
+      setSpellSuggestions(window.spellCheckWord.suggestions);
+    } else {
+      setSpellSuggestions([]);
+    }
+  }, [editor, position]);
 
   // --- SMART TYPE DETECTION ---
   const detectType = (text) => {
@@ -80,6 +97,27 @@ const EditorContextMenu = ({ editor, position, onClose }) => {
     setShowLoreModal(true);
   };
 
+  const handleGrammarFix = (replacement) => {
+    if (!editor || !grammarSuggestion) return;
+    editor.chain()
+      .focus()
+      .deleteRange({ from: grammarSuggestion.from, to: grammarSuggestion.to })
+      .insertContentAt(grammarSuggestion.from, replacement)
+      .run();
+    onClose();
+  };
+
+  const handleSpellFix = (replacement) => {
+    if (!editor || !window.spellCheckWord) return;
+    const { from, to } = window.spellCheckWord;
+    editor.chain()
+      .focus()
+      .deleteRange({ from, to })
+      .insertContentAt(from, replacement)
+      .run();
+    onClose();
+  };
+
   if (!position) return null;
 
   return (
@@ -92,6 +130,22 @@ const EditorContextMenu = ({ editor, position, onClose }) => {
         }}
         onClick={(e) => e.stopPropagation()}
       >
+        {/* GRAMMAR SUGGESTIONS (if clicked on underlined error) */}
+        {grammarSuggestion && grammarSuggestion.replacements.length > 0 && (
+          <>
+            <div style={sectionStyle}>📝 Grammar Suggestions</div>
+            <div style={{ ...itemStyle, cursor: 'default', opacity: 0.8, fontSize: '12px', padding: '8px 12px' }}>
+              {grammarSuggestion.message}
+            </div>
+            {grammarSuggestion.replacements.map((replacement, idx) => (
+              <button key={idx} onClick={() => handleGrammarFix(replacement)} style={itemStyle}>
+                ✓ {replacement}
+              </button>
+            ))}
+            <div style={dividerStyle}></div>
+          </>
+        )}
+
         {/* STANDARD EDIT OPERATIONS */}
         <div style={sectionStyle}>Standard</div>
         <button onClick={handleCut} style={itemStyle}>✂️ Cut</button>

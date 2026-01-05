@@ -12,11 +12,38 @@ const LeftPanel = () => {
   const [modal, setModal] = useState({ isOpen: false, type: 'confirm', title: '', message: '', onConfirm: () => {} });
   const [deletedChapter, setDeletedChapter] = useState(null); 
   const [showToast, setShowToast] = useState(false);
+  const [pendingNavigation, setPendingNavigation] = useState(null);
   
   // NEW: Search State
   const [searchTerm, setSearchTerm] = useState('');
 
   const closeModal = () => setModal({ ...modal, isOpen: false });
+
+  // Check for unsaved changes before navigation
+  const checkUnsavedChanges = (path) => {
+    const hasUnsavedChanges = sessionStorage.getItem('hasUnsavedChanges') === 'true';
+    const autoSaveEnabled = localStorage.getItem('autoSaveEnabled');
+    const isAutoSaveOn = autoSaveEnabled !== null ? JSON.parse(autoSaveEnabled) : true;
+    
+    // If we're on the editor with unsaved changes and auto-save is off, show warning
+    if (location.pathname === '/editor' && hasUnsavedChanges && !isAutoSaveOn) {
+      setPendingNavigation(path);
+      setModal({
+        isOpen: true,
+        type: 'confirm',
+        title: '⚠️ Unsaved Changes',
+        message: 'You have unsaved changes. Do you want to navigate away without saving?',
+        onConfirm: () => {
+          sessionStorage.removeItem('hasUnsavedChanges');
+          setPendingNavigation(null);
+          navigate(path);
+          closeModal();
+        }
+      });
+      return false;
+    }
+    return true;
+  };
 
   // --- ACTIONS ---
   const handleAddChapter = () => {
@@ -38,7 +65,9 @@ const LeftPanel = () => {
   };
 
   const handleNav = (path) => {
-    navigate(path);
+    if (checkUnsavedChanges(path)) {
+      navigate(path);
+    }
   };
 
   const isActive = (id) => {

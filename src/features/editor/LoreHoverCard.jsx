@@ -1,29 +1,54 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 
 const LoreHoverCard = ({ character, position }) => {
+  const navigate = useNavigate();
+  
   if (!character) return null;
 
   const aliasString = character.aliases && character.aliases.length > 0 
     ? character.aliases.join(', ') 
     : null;
 
+  const handleClick = () => {
+    const hasUnsavedChanges = sessionStorage.getItem('hasUnsavedChanges') === 'true';
+    const autoSaveEnabled = localStorage.getItem('autoSaveEnabled');
+    const isAutoSaveOn = autoSaveEnabled !== null ? JSON.parse(autoSaveEnabled) : true;
+    
+    // If auto-save is off and there are unsaved changes, trigger warning
+    if (!isAutoSaveOn && hasUnsavedChanges) {
+      window.pendingLoreNavigation = character.id;
+      // Trigger the warning modal by dispatching a custom event
+      window.dispatchEvent(new CustomEvent('showUnsavedWarning'));
+      return;
+    }
+    
+    navigate(`/lore?id=${character.id}`);
+  };
+
   return (
-    <div style={{
-      position: 'fixed',
-      left: position.x,
-      top: position.y + 24,
-      zIndex: 2000,
-      background: 'var(--bg-panel)',
-      border: '1px solid var(--accent)',
-      borderRadius: '8px',
-      padding: '12px',
-      width: '280px',
-      boxShadow: '0 8px 30px rgba(0,0,0,0.6)',
-      display: 'flex',
-      gap: '12px',
-      pointerEvents: 'none',
-      animation: 'fadeIn 0.2s ease-out'
-    }}>
+    <div 
+      onClick={handleClick}
+      style={{
+        position: 'fixed',
+        left: position.x,
+        top: position.y + 24,
+        zIndex: 2000,
+        background: 'var(--bg-panel)',
+        border: '1px solid var(--accent)',
+        borderRadius: '8px',
+        padding: '12px',
+        width: '280px',
+        boxShadow: '0 8px 30px rgba(0,0,0,0.6)',
+        display: 'flex',
+        gap: '12px',
+        cursor: 'pointer',
+        animation: 'fadeIn 0.2s ease-out',
+        transition: 'transform 0.1s ease'
+      }}
+      onMouseEnter={(e) => e.currentTarget.style.transform = 'translateY(-2px)'}
+      onMouseLeave={(e) => e.currentTarget.style.transform = 'translateY(0)'}
+    >
       <div style={{
         width: '60px', height: '60px', borderRadius: '50%', overflow: 'hidden',
         border: '2px solid var(--border)', flexShrink: 0, background: '#000',

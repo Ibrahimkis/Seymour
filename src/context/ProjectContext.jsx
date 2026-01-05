@@ -156,7 +156,7 @@ export const ProjectProvider = ({ children }) => {
         console.error("❌ IndexedDB save failed:", err);
         showAlert("⚠️ Save failed. Your browser may be blocking storage.", "Save Error");
       }
-    }, 600);
+    }, 2000); // Auto-save every 2 seconds
 
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current);
@@ -173,6 +173,7 @@ export const ProjectProvider = ({ children }) => {
           const currentSave = await dbGet("seymour_data");
           if (currentSave) await dbSet("seymour_data_backup", currentSave);
           await dbSet("seymour_data", projectData);
+          console.log("💾 Saved on tab hide");
         } catch (e) {
           console.warn("visibility save failed:", e);
         }
@@ -181,6 +182,29 @@ export const ProjectProvider = ({ children }) => {
 
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);
+  }, [projectData, isLoaded]);
+
+  // Save immediately before page unload/refresh
+  useEffect(() => {
+    if (!isLoaded) return;
+
+    const handleBeforeUnload = async (e) => {
+      try {
+        // Cancel the pending save timer
+        if (saveTimer.current) clearTimeout(saveTimer.current);
+        
+        // Save immediately
+        const currentSave = await dbGet("seymour_data");
+        if (currentSave) await dbSet("seymour_data_backup", currentSave);
+        await dbSet("seymour_data", projectData);
+        console.log("💾 Saved before unload");
+      } catch (err) {
+        console.error("Failed to save before unload:", err);
+      }
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [projectData, isLoaded]);
 
   // --- 3. EXPORT / IMPORT ---

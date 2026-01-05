@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { HashRouter as Router, Routes, Route } from 'react-router-dom';
+import { HashRouter as Router, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import ErrorBoundary from './components/ErrorBoundary';
 import Layout from './components/Layout';
+import SplashScreen from './components/SplashScreen';
 import { useProject } from './context/ProjectContext';
 
 // Import Features
@@ -14,9 +15,34 @@ import RelationshipWeb from './features/relationships/RelationshipWeb';
 
 import './App.css';
 
+// Component to force initial navigation to /lore
+const InitialNavigator = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  
+  useEffect(() => {
+    // Only navigate on first load (when at root)
+    if (location.pathname === '/') {
+      navigate('/lore', { replace: true });
+    }
+  }, []);
+  
+  return null;
+};
+
 function App() {
   const [theme, setTheme] = useState('dark');
+  const [showSplash, setShowSplash] = useState(true);
   const { saveToDisk, loadFromDisk, projectData, setProjectData } = useProject();
+
+  // Show splash screen for 3-5 seconds for premium feel
+  useEffect(() => {
+    const splashDuration = 3000 + Math.random() * 2000; // Random between 3-5 seconds
+    const timer = setTimeout(() => {
+      setShowSplash(false);
+    }, splashDuration);
+    return () => clearTimeout(timer);
+  }, []);
 
   // Default project structure (should match ProjectContext)
   const defaultProject = {
@@ -107,9 +133,15 @@ function App() {
     setTheme(prev => prev === 'dark' ? 'light' : 'dark');
   };
 
+  // Show splash screen while loading
+  if (showSplash) {
+    return <SplashScreen />;
+  }
+
   return (
     <ErrorBoundary>
       <Router>
+        <InitialNavigator />
         <Routes>
           {/* DIRECT ACCESS TO LAYOUT (No Login Required) */}
           <Route path="/" element={<Layout theme={theme} toggleTheme={toggleTheme} />}>

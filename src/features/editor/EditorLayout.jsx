@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react'; 
 import StarterKit from '@tiptap/starter-kit';
 import Underline from '@tiptap/extension-underline';
@@ -17,8 +17,10 @@ import LoreHoverCard from './LoreHoverCard';
 import TypographyControls from './TypographyControls'; 
 import ChapterInspector from './ChapterInspector';
 import EditorContextMenu from './EditorContextMenu'; // <--- NEW IMPORT
+import CustomModal from '../../components/CustomModal';
 import { useProject } from '../../context/ProjectContext';
 import { LoreMark } from './LoreExtension';
+import { GrammarExtension } from './GrammarExtension';
 
 const EditorLayout = () => {
   const { projectData, setProjectData } = useProject();
@@ -36,13 +38,18 @@ const EditorLayout = () => {
   }
   const chapter = chapters[chapterIndex];
 
-  const [autoSaveEnabled, setAutoSaveEnabled] = useState(true);
+  const [autoSaveEnabled, setAutoSaveEnabled] = useState(() => {
+    const saved = localStorage.getItem('autoSaveEnabled');
+    return saved !== null ? JSON.parse(saved) : true; // Always true by default
+  });
   const [status, setStatus] = useState('Saved');
   const [hoveredChar, setHoveredChar] = useState(null);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const [isTypewriterMode, setIsTypewriterMode] = useState(false);
   const [isFocusMode, setIsFocusMode] = useState(false);
   const [showInspector, setShowInspector] = useState(true);
+  const [showUnsavedWarning, setShowUnsavedWarning] = useState(false);
+  const [pendingChapterId, setPendingChapterId] = useState(null);
   
   // --- NEW: Context Menu State ---
   const [contextMenu, setContextMenu] = useState(null);
@@ -84,6 +91,7 @@ const EditorLayout = () => {
       BubbleMenuExtension.configure({
         element: null,
       }),
+      GrammarExtension,
     ],
     content: chapter?.content || '',
     editorProps: { 
@@ -92,8 +100,13 @@ const EditorLayout = () => {
         spellcheck: 'true' // <--- ENABLE SPELL CHECK
       },
     },
+    onCreate: ({ editor }) => {
+      // Set the current chapter ID when editor is created
+      editor.storage.currentChapterId = chapter?.id;
+    },
     onUpdate: () => {
-      if (autoSaveEnabled) setStatus('Unsaved changes...');
+      setStatus('Unsaved changes...');
+      sessionStorage.setItem('hasUnsavedChanges', 'true');
     },
     onTransaction: ({ transaction, editor }) => {
       if (!isTypewriterMode || (!transaction.docChanged && !transaction.selectionSet)) return;
@@ -124,10 +137,102 @@ const EditorLayout = () => {
   });
 
   useEffect(() => {
-    if (editor && chapter && editor.getHTML() !== chapter.content) {
-      editor.commands.setContent(chapter.content);
+    // Load chapter content when switching
+    if (editor && chapter) {
+      const hasChanges = sessionStorage.getItem('hasUnsavedChanges') === 'true';
+      const currentId = editor.storage?.currentChapterId;
+      const isDifferentChapter = currentId && currentId !== chapter.id;
+      
+      // If switching chapters with auto-save off and unsaved changes, show warning
+      if (isDifferentChapter && !autoSaveEnabled && hasChanges) {
+        setPendingChapterId(chapter.id);
+        setShowUnsavedWarning(true);
+        return; // Don't switch yet
+      }
+      
+      // Load the chapter if it's different or empty
+      if (isDifferentChapter || !currentId) {
+        editor.commands.setContent(chapter.content || '');
+        editor.storage.currentChapterId = chapter.id;
+        setLocalTitle(chapter.title);
+        setStatus('Saved');
+        sessionStorage.removeItem('hasUnsavedChanges');
+      }
     }
-  }, [chapter?.id, editor]);
+  }, [chapter?.id, editor, autoSaveEnabled]);
+
+  // Separate effect for warning/saving on chapter switch
+  useEffect(() => {
+    let savedBeforeSwitch = false;
+    
+    return () => {
+      if (savedBeforeSwitch) return;
+      
+      // Save if autosave is on
+      if (editor && autoSaveEnabled && status === 'Unsaved changes...') {
+        const content = editor.getHTML();
+        const newManuscript = { ...projectData.manuscript };
+        newManuscript.chapters[chapterIndex] = { ...chapter, content, title: localTitle };
+        setProjectData({ ...projectData, manuscript: newManuscript });
+        sessionStorage.removeItem('hasUnsavedChanges');
+        savedBeforeSwitch = true;
+      }
+    };
+  }, [chapter?.id]);
+
+  // Handle warning modal actions
+  const handleSaveAndSwitch = () => {
+    if (editor) {
+      saveChapter(editor.getHTML(), localTitle);
+      setStatus('Saved');
+      sessionStorage.removeItem('hasUnsavedChanges');
+      setShowUnsavedWarning(false);
+      
+      // Check if navigating to lore or switching chapters
+      if (window.pendingLoreNavigation) {
+        const loreId = window.pendingLoreNavigation;
+        window.pendingLoreNavigation = null;
+        navigate(`/lore?id=${loreId}`);
+      } else if (pendingChapterId) {
+        // Force chapter reload
+        const newChapter = projectData.manuscript.chapters.find(ch => ch.id === pendingChapterId);
+        if (newChapter && editor) {
+          editor.commands.setContent(newChapter.content);
+          editor.storage.currentChapterId = newChapter.id;
+          setLocalTitle(newChapter.title);
+        }
+      }
+      setPendingChapterId(null);
+    }
+  };
+
+  const handleDiscardAndSwitch = () => {
+    sessionStorage.removeItem('hasUnsavedChanges');
+    setShowUnsavedWarning(false);
+    setStatus('Saved');
+    
+    // Check if navigating to lore or switching chapters
+    if (window.pendingLoreNavigation) {
+      const loreId = window.pendingLoreNavigation;
+      window.pendingLoreNavigation = null;
+      navigate(`/lore?id=${loreId}`);
+    } else if (pendingChapterId && editor) {
+      // Force chapter reload
+      const newChapter = projectData.manuscript.chapters.find(ch => ch.id === pendingChapterId);
+      if (newChapter && editor) {
+        editor.commands.setContent(newChapter.content);
+        editor.storage.currentChapterId = newChapter.id;
+        setLocalTitle(newChapter.title);
+      }
+    }
+    setPendingChapterId(null);
+  };
+
+  const handleCancelSwitch = () => {
+    setShowUnsavedWarning(false);
+    setPendingChapterId(null);
+    window.pendingLoreNavigation = null;
+  };
 
   useEffect(() => {
     if (!editor || !autoSaveEnabled) return;
@@ -135,16 +240,17 @@ const EditorLayout = () => {
       if (status === 'Unsaved changes...') {
         saveChapter(editor.getHTML(), chapter.title);
         setStatus('Saved');
+        sessionStorage.setItem('hasUnsavedChanges', 'false');
       }
-    }, 1500);
+    }, 2000); // Save every 2 seconds
     return () => clearTimeout(saveTimer);
   }, [status, autoSaveEnabled, editor, chapter?.id]);
 
-  const saveChapter = (newContent, newTitle) => {
+  const saveChapter = useCallback((newContent, newTitle) => {
     const newManuscript = { ...projectData.manuscript };
     newManuscript.chapters[chapterIndex] = { ...chapter, content: newContent, title: newTitle };
     setProjectData({ ...projectData, manuscript: newManuscript });
-  };
+  }, [projectData, chapterIndex, chapter]);
 
   const handleTitleChange = (e) => {
     const newTitle = e.target.value;
@@ -159,7 +265,7 @@ const EditorLayout = () => {
       titleSaveTimer.current = setTimeout(() => {
         saveChapter(editor?.getHTML(), newTitle);
         setStatus('Saved');
-      }, 1500);
+      }, 2000); // Save 2 seconds after title change
     }
   };
 
@@ -224,30 +330,42 @@ const EditorLayout = () => {
         c.name.toLowerCase() === text.toLowerCase() || 
         (c.aliases && c.aliases.some(alias => alias.toLowerCase() === text.toLowerCase()))
       );
-      if (char) navigate(`/lore?id=${char.id}`);
+      if (char) {
+        const hasUnsavedChanges = sessionStorage.getItem('hasUnsavedChanges') === 'true';
+        
+        // If auto-save is off and there are unsaved changes, show warning
+        if (!autoSaveEnabled && hasUnsavedChanges) {
+          setPendingChapterId(null); // Not switching chapters, navigating away
+          setShowUnsavedWarning(true);
+          // Store the intended navigation for later
+          window.pendingLoreNavigation = char.id;
+          return;
+        }
+        navigate(`/lore?id=${char.id}`);
+      }
     }
   };
 
   // --- NEW: Right-Click Handler ---
   const handleContextMenu = (e) => {
-    // Check if we're running in Electron
     const isElectron = window.electronAPI !== undefined;
     
-    // If in Electron, check if clicking on a misspelled word
-    if (isElectron) {
-      // Don't prevent default - let Electron's spell check menu show
-      // Only show custom menu if there's text selected
-      if (!editor || !editor.state.selection || editor.state.selection.empty) {
-        return; // Let native menu show
-      }
+    // In Electron, always show custom menu
+    // In browser, only show custom menu if text is selected (otherwise let native spell check show)
+    if (!isElectron && (!editor || editor.state.selection.empty)) {
+      // Let browser's native context menu show for spell check
+      return;
     }
     
-    e.preventDefault(); // Prevent browser's default menu
-    
+    e.preventDefault();
+
     setContextMenu({
       x: e.clientX,
       y: e.clientY
     });
+
+    // Clear previous spell check data
+    window.spellCheckWord = null;
   };
 
   // --- NEW: Close context menu on click ---
@@ -255,6 +373,16 @@ const EditorLayout = () => {
     const handleClick = () => setContextMenu(null);
     document.addEventListener('click', handleClick);
     return () => document.removeEventListener('click', handleClick);
+  }, []);
+
+  // --- Listen for unsaved warning trigger from LoreHoverCard ---
+  useEffect(() => {
+    const handleShowWarning = () => {
+      setShowUnsavedWarning(true);
+      setPendingChapterId(null); // Not switching chapters
+    };
+    window.addEventListener('showUnsavedWarning', handleShowWarning);
+    return () => window.removeEventListener('showUnsavedWarning', handleShowWarning);
   }, []);
 
   // --- NEW: Ctrl + Mouse Wheel Zoom ---
@@ -339,18 +467,7 @@ const EditorLayout = () => {
             <button onClick={() => setShowInspector(!showInspector)} style={showInspector ? activeMagicBtnStyle : magicBtnStyle} title="Chapter Inspector">🔎</button>
         </div>
         <div style={rightStatusAreaStyle}>
-          <span style={{ color: status === 'Saved' ? 'var(--text-muted)' : 'var(--accent)' }}>{status}</span>
-          
-          {!autoSaveEnabled && (
-            <button onClick={handleManualSave} style={manualSaveBtnStyle}>
-              💾 Save Now
-            </button>
-          )}
-          
-          <label style={{ display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer', userSelect: 'none' }}>
-            <input type="checkbox" checked={autoSaveEnabled} onChange={(e) => setAutoSaveEnabled(e.target.checked)} style={{ cursor: 'pointer' }} />
-            <span style={{ color: 'var(--text-main)' }}>Auto-Save</span>
-          </label>
+          <span style={{ fontSize: '11px', color: status === 'Saved' ? 'var(--text-muted)' : 'var(--accent)' }}>{status}</span>
         </div>
       </div>
 
@@ -400,6 +517,77 @@ const EditorLayout = () => {
           onClose={() => setContextMenu(null)}
         />
       )}
+
+      {/* UNSAVED CHANGES WARNING */}
+      <CustomModal
+        isOpen={showUnsavedWarning}
+        onClose={handleCancelSwitch}
+        title="⚠️ Unsaved Changes"
+      >
+        <p style={{ marginBottom: '15px', color: 'var(--text-main)' }}>
+          You have unsaved changes and auto-save is currently disabled. 
+          What would you like to do?
+        </p>
+        <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+          <button
+            onClick={handleSaveAndSwitch}
+            style={{
+              padding: '8px 16px',
+              background: 'var(--accent)',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontWeight: 'bold'
+            }}
+          >
+            Save and Switch
+          </button>
+          <button
+            onClick={() => {
+              setAutoSaveEnabled(true);
+              localStorage.setItem('autoSaveEnabled', 'true');
+              handleSaveAndSwitch();
+            }}
+            style={{
+              padding: '8px 16px',
+              background: 'var(--accent)',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer'
+            }}
+          >
+            Enable Auto-Save
+          </button>
+          <button
+            onClick={handleDiscardAndSwitch}
+            style={{
+              padding: '8px 16px',
+              background: 'transparent',
+              color: 'var(--text-muted)',
+              border: '1px solid var(--border)',
+              borderRadius: '4px',
+              cursor: 'pointer'
+            }}
+          >
+            Discard Changes
+          </button>
+          <button
+            onClick={handleCancelSwitch}
+            style={{
+              padding: '8px 16px',
+              background: 'transparent',
+              color: 'var(--text-muted)',
+              border: '1px solid var(--border)',
+              borderRadius: '4px',
+              cursor: 'pointer'
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+      </CustomModal>
     </div>
   );
 };
@@ -413,7 +601,6 @@ const titleInputStyle = { width: '100%', background: 'transparent', border: 'non
 const editorWrapperStyle = { color: 'var(--text-main)', lineHeight: '1.8' };
 const magicBtnStyle = { background: 'none', border: '1px solid var(--accent)', color: 'var(--accent)', borderRadius: '4px', padding: '4px 8px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' };
 const activeMagicBtnStyle = { ...magicBtnStyle, background: 'var(--accent)', color: 'white' };
-const manualSaveBtnStyle = { background: 'var(--accent)', border: 'none', color: 'white', borderRadius: '4px', padding: '4px 10px', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' };
 const bubbleMenuStyle = { background: '#111', border: '1px solid #444', borderRadius: '6px', display: 'flex', padding: '2px', boxShadow: '0 8px 24px rgba(0,0,0,0.5)' };
 const bubbleBtn = { background: 'transparent', border: 'none', color: '#ccc', padding: '5px 10px', cursor: 'pointer', fontWeight: 'bold' };
 const activeBubbleBtn = { ...bubbleBtn, color: 'var(--accent)' };

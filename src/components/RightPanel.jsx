@@ -73,11 +73,14 @@ const FolderNode = ({ folder, allFolders, allItems, level, onToggle, onCreateFol
           {childItems.map(item => (
             <div 
               key={item.id} 
-              onClick={() => onNavigate(item.id)}
+              onClick={(e) => {
+                e.stopPropagation();
+                onNavigate(item.id);
+              }}
               className="omnibus-item"
               draggable="true"
               onDragStart={(e) => handleItemDragStart(e, item.id)}
-              style={{ ...rowStyle, paddingLeft: `${(level + 1) * 15 + 15}px`, cursor: 'grab' }}
+              style={{ ...rowStyle, paddingLeft: `${(level + 1) * 15 + 15}px`, cursor: 'pointer' }}
             >
               <span style={{ flex: 1, color: 'var(--text-main)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {item.name}
@@ -104,6 +107,30 @@ const RightPanel = () => {
   const [modal, setModal] = useState({ isOpen: false, type: 'confirm', title: '', message: '', onConfirm: () => {} });
   const [activeTab, setActiveTab] = useState('lore'); 
   const [searchTerm, setSearchTerm] = useState('');
+
+  // Check for unsaved changes before navigation
+  const checkAndNavigate = (path) => {
+    const hasUnsavedChanges = sessionStorage.getItem('hasUnsavedChanges') === 'true';
+    const autoSaveEnabled = localStorage.getItem('autoSaveEnabled');
+    const isAutoSaveOn = autoSaveEnabled !== null ? JSON.parse(autoSaveEnabled) : true;
+    
+    // If on editor with unsaved changes and auto-save is off, show warning
+    if (window.location.pathname === '/editor' && hasUnsavedChanges && !isAutoSaveOn) {
+      setModal({
+        isOpen: true,
+        type: 'confirm',
+        title: '⚠️ Unsaved Changes',
+        message: 'You have unsaved changes. Do you want to navigate away without saving?',
+        onConfirm: () => {
+          sessionStorage.removeItem('hasUnsavedChanges');
+          navigate(path);
+          setModal({ ...modal, isOpen: false });
+        }
+      });
+      return;
+    }
+    navigate(path);
+  };
 
   // Init
   useEffect(() => {
@@ -245,7 +272,7 @@ const RightPanel = () => {
                 <div style={{ padding: '5px' }}>
                   {searchResults.length === 0 && <div style={{ padding: '10px', color: '#666', fontSize: '12px', fontStyle: 'italic' }}>No matches found.</div>}
                   {searchResults.map(item => (
-                    <div key={item.id} onClick={() => navigate(`/lore?id=${item.id}`)} className="omnibus-item" style={{ ...rowStyle, cursor: 'pointer', borderRadius: '4px', marginBottom: '2px', display: 'flex', alignItems: 'center' }}>
+                    <div key={item.id} onClick={() => checkAndNavigate(`/lore?id=${item.id}`)} className="omnibus-item" style={{ ...rowStyle, cursor: 'pointer', borderRadius: '4px', marginBottom: '2px', display: 'flex', alignItems: 'center' }}>
                       <span style={{ fontSize: '12px', marginRight: '6px' }}>👤</span>
                       <div style={{ flex: 1, overflow: 'hidden' }}>
                         <div style={{ fontWeight: 'bold', fontSize: '13px', color: 'var(--text-main)' }}>{item.name}</div>
@@ -255,7 +282,7 @@ const RightPanel = () => {
                   ))}
                 </div>
               ) : (
-                rootFolders.map(folder => ( <FolderNode key={folder.id} folder={folder} allFolders={folders} allItems={items} level={0} onToggle={toggleFolder} onCreateFolder={createFolder} onCreateItem={createItem} onNavigate={(id) => navigate(`/lore?id=${id}`)} onDeleteFolder={deleteFolder} onMoveItem={handleMoveItem} onDeleteItem={handleDeleteItem} onReorderFolders={handleReorderFolders} /> ))
+                rootFolders.map(folder => ( <FolderNode key={folder.id} folder={folder} allFolders={folders} allItems={items} level={0} onToggle={toggleFolder} onCreateFolder={createFolder} onCreateItem={createItem} onNavigate={(id) => checkAndNavigate(`/lore?id=${id}`)} onDeleteFolder={deleteFolder} onMoveItem={handleMoveItem} onDeleteItem={handleDeleteItem} onReorderFolders={handleReorderFolders} /> ))
               )}
             </div>
           </>

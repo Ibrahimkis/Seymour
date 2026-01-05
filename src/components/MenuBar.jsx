@@ -32,6 +32,11 @@ const MenuBar = ({ toggleTheme, isZenMode, toggleZenMode }) => {
   const [activeMenu, setActiveMenu] = useState(null);
   const [showCompile, setShowCompile] = useState(false);
   const [showExportLore, setShowExportLore] = useState(false);
+  const [showAutoSaveWarning, setShowAutoSaveWarning] = useState(false);
+  const [autoSaveEnabled, setAutoSaveEnabled] = useState(() => {
+    const saved = localStorage.getItem('autoSaveEnabled');
+    return saved === null || saved === 'true';
+  });
   
   // Modal State for New/Save As
   const [modal, setModal] = useState({ isOpen: false, type: 'confirm', title: '', message: '', onConfirm: () => {} });
@@ -188,14 +193,25 @@ const MenuBar = ({ toggleTheme, isZenMode, toggleZenMode }) => {
             <button style={dropdownItemStyle} onClick={() => { setShowExportLore(true); setActiveMenu(null); }}>
                📚 Export Lore Cards...
             </button>
+            
+            <div style={{height: 1, background: '#444', margin: '5px 0'}}></div>
+            <button 
+              style={{...dropdownItemStyle, color: '#ff6b6b'}} 
+              onClick={() => {
+                setShowAutoSaveWarning(true);
+                setActiveMenu(null);
+              }}
+            >
+              ⚙️ Advanced: Auto-Save Settings
+            </button>
           </Menu>
 
           <Menu label="View" name="view">
             <button style={dropdownItemStyle} onClick={toggleTheme}>
-               🌗 Toggle Theme
+              🌗 Toggle Theme
             </button>
             <button style={dropdownItemStyle} onClick={toggleZenMode}>
-               {isZenMode ? 'Show Sidebars' : 'Zen Mode (Hide Sidebars)'}
+              {isZenMode ? 'Show Sidebars' : 'Zen Mode (Hide Sidebars)'}
             </button>
           </Menu>
 
@@ -207,6 +223,159 @@ const MenuBar = ({ toggleTheme, isZenMode, toggleZenMode }) => {
 
         </div>
       </div>
+
+      {/* COMPILE & EXPORT MODALS */}
+      {showCompile && <CompileModal isOpen={showCompile} onClose={() => setShowCompile(false)} />}
+      {showExportLore && <ExportLoreModal isOpen={showExportLore} onClose={() => setShowExportLore(false)} />}
+      
+      {/* AUTO-SAVE WARNING MODAL */}
+      {showAutoSaveWarning && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0,0,0,0.8)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 10000
+        }}>
+          <div style={{
+            background: 'var(--bg-panel)',
+            border: '1px solid var(--border)',
+            borderRadius: '8px',
+            padding: '30px',
+            maxWidth: '600px',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.5)'
+          }}>
+            <h2 style={{ margin: '0 0 20px 0', color: 'var(--text-main)', fontSize: '20px' }}>
+              {autoSaveEnabled ? '⚠️ CRITICAL WARNING: Auto-Save Settings' : '✅ Re-enable Auto-Save'}
+            </h2>
+            
+            {autoSaveEnabled ? (
+              // Warning when auto-save is currently ON
+              <div style={{ marginBottom: '20px' }}>
+                <p style={{ color: '#ff6b6b', fontWeight: 'bold', fontSize: '16px', marginBottom: '15px' }}>
+                  ⚠️ DANGER: Disabling Auto-Save Can Cause Data Loss!
+                </p>
+                <p style={{ color: 'var(--text-main)', marginBottom: '10px', lineHeight: '1.6' }}>
+                  Auto-save is <strong>CURRENTLY ENABLED</strong> for your protection. Your work is automatically saved every 2 seconds.
+                </p>
+                <p style={{ color: 'var(--text-muted)', marginBottom: '15px', fontSize: '13px', lineHeight: '1.6' }}>
+                  <strong>Disabling auto-save means:</strong>
+                </p>
+                <ul style={{ color: 'var(--text-muted)', fontSize: '13px', lineHeight: '1.8', paddingLeft: '20px' }}>
+                  <li>You could lose hours of work if the app crashes</li>
+                  <li>Browser refresh will lose unsaved changes</li>
+                  <li>Switching chapters without saving loses your edits</li>
+                  <li>You must manually save constantly</li>
+                </ul>
+                <p style={{ color: '#ff6b6b', marginTop: '15px', fontSize: '14px', fontWeight: 'bold' }}>
+                  We STRONGLY recommend keeping auto-save enabled.
+                </p>
+              </div>
+            ) : (
+              // Message when auto-save is currently OFF
+              <div style={{ marginBottom: '20px' }}>
+                <p style={{ color: '#4ade80', fontWeight: 'bold', fontSize: '16px', marginBottom: '15px' }}>
+                  ✅ Auto-Save is Currently DISABLED
+                </p>
+                <p style={{ color: 'var(--text-main)', marginBottom: '10px', lineHeight: '1.6' }}>
+                  Your work is <strong>NOT being saved automatically</strong>. You're responsible for manually saving your changes.
+                </p>
+                <p style={{ color: 'var(--text-muted)', marginBottom: '15px', fontSize: '13px', lineHeight: '1.6' }}>
+                  <strong>Re-enabling auto-save will:</strong>
+                </p>
+                <ul style={{ color: 'var(--text-muted)', fontSize: '13px', lineHeight: '1.8', paddingLeft: '20px' }}>
+                  <li>Automatically save your work every 2 seconds</li>
+                  <li>Protect you from losing progress if the app crashes</li>
+                  <li>Eliminate the need to manually save constantly</li>
+                  <li>Prevent data loss from accidental browser refresh</li>
+                </ul>
+                <p style={{ color: '#4ade80', marginTop: '15px', fontSize: '14px', fontWeight: 'bold' }}>
+                  Recommended: Enable auto-save for maximum safety!
+                </p>
+              </div>
+            )}
+            
+          <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+            {autoSaveEnabled ? (
+              // Buttons when auto-save is ON
+              <>
+                <button
+                  onClick={() => setShowAutoSaveWarning(false)}
+                  style={{
+                    padding: '10px 20px',
+                    background: 'var(--accent)',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                    fontWeight: 'bold'
+                  }}
+                >
+                  Keep Auto-Save ON (Recommended)
+                </button>
+                <button
+                  onClick={() => {
+                    localStorage.setItem('autoSaveEnabled', 'false');
+                    setShowAutoSaveWarning(false);
+                    window.location.reload();
+                  }}
+                  style={{
+                    padding: '10px 20px',
+                    background: 'transparent',
+                    color: '#ff6b6b',
+                    border: '1px solid #ff6b6b',
+                    borderRadius: '4px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  I Understand the Risks - Disable It
+                </button>
+              </>
+            ) : (
+              // Buttons when auto-save is OFF
+              <>
+                <button
+                  onClick={() => setShowAutoSaveWarning(false)}
+                  style={{
+                    padding: '10px 20px',
+                    background: 'transparent',
+                    color: 'var(--text-muted)',
+                    border: '1px solid var(--border)',
+                    borderRadius: '4px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    localStorage.setItem('autoSaveEnabled', 'true');
+                    setShowAutoSaveWarning(false);
+                    window.location.reload();
+                  }}
+                  style={{
+                    padding: '10px 20px',
+                    background: 'var(--accent)',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                    fontWeight: 'bold'
+                  }}
+                >
+                  ✅ Enable Auto-Save (Recommended)
+                </button>
+              </>
+            )}
+          </div>
+          </div>
+        </div>
+      )}
     </>
   );
 };
