@@ -11,8 +11,6 @@ const EditorContextMenu = ({ editor, position, onClose }) => {
   const [modalMode, setModalMode] = useState(null); // 'create' or 'addTo'
   const [selectedText, setSelectedText] = useState('');
   const [suggestedType, setSuggestedType] = useState('Character');
-  const [synonyms, setSynonyms] = useState([]);
-  const [loadingSynonyms, setLoadingSynonyms] = useState(false);
 
   useEffect(() => {
     if (!editor) return;
@@ -22,50 +20,6 @@ const EditorContextMenu = ({ editor, position, onClose }) => {
     
     // Smart type detection
     setSuggestedType(detectType(text));
-
-    // Fetch synonyms if single word is selected
-    if (text && text.trim().split(/\s+/).length === 1) {
-      setLoadingSynonyms(true);
-      const word = text.trim().toLowerCase();
-      
-      // Query multiple Datamuse endpoints for better results
-      Promise.all([
-        fetch(`https://api.datamuse.com/words?rel_syn=${encodeURIComponent(word)}&max=15`).then(r => r.json()),
-        fetch(`https://api.datamuse.com/words?ml=${encodeURIComponent(word)}&max=15`).then(r => r.json()),
-      ])
-        .then(([synonyms, meansLike]) => {
-          // Combine and score results
-          const wordScores = new Map();
-          
-          // Synonyms get higher priority
-          synonyms.forEach((item, idx) => {
-            const score = (synonyms.length - idx) * 2 + (item.score || 0);
-            wordScores.set(item.word, (wordScores.get(item.word) || 0) + score);
-          });
-          
-          // "Means like" adds to score
-          meansLike.forEach((item, idx) => {
-            const score = (meansLike.length - idx) + (item.score || 0);
-            wordScores.set(item.word, (wordScores.get(item.word) || 0) + score);
-          });
-          
-          // Sort by score and take top 8
-          const topSynonyms = Array.from(wordScores.entries())
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 8)
-            .map(([word]) => word)
-            .filter(w => w.toLowerCase() !== word); // Exclude the original word
-          
-          setSynonyms(topSynonyms);
-        })
-        .catch(err => {
-          console.error('Failed to fetch synonyms:', err);
-          setSynonyms([]);
-        })
-        .finally(() => setLoadingSynonyms(false));
-    } else {
-      setSynonyms([]);
-    }
   }, [editor]);
 
   // --- SMART TYPE DETECTION ---
@@ -126,12 +80,6 @@ const EditorContextMenu = ({ editor, position, onClose }) => {
     setShowLoreModal(true);
   };
 
-  const handleReplaceSynonym = (synonym) => {
-    if (!editor) return;
-    editor.chain().focus().insertContent(synonym).run();
-    onClose();
-  };
-
   if (!position) return null;
 
   return (
@@ -151,25 +99,6 @@ const EditorContextMenu = ({ editor, position, onClose }) => {
         <button onClick={handlePaste} style={itemStyle}>📄 Paste</button>
         <div style={dividerStyle}></div>
         <button onClick={handleSelectAll} style={itemStyle}>🔲 Select All</button>
-        
-        {/* SYNONYMS (only show if single word is selected) */}
-        {selectedText && selectedText.trim().split(/\s+/).length === 1 && (
-          <>
-            <div style={dividerStyle}></div>
-            <div style={sectionStyle}>✨ Synonyms for "{selectedText.slice(0, 15)}{selectedText.length > 15 ? '...' : ''}"</div>
-            {loadingSynonyms ? (
-              <div style={{ ...itemStyle, cursor: 'default', opacity: 0.6 }}>Loading...</div>
-            ) : synonyms.length > 0 ? (
-              synonyms.map((syn, idx) => (
-                <button key={idx} onClick={() => handleReplaceSynonym(syn)} style={itemStyle}>
-                  {syn}
-                </button>
-              ))
-            ) : (
-              <div style={{ ...itemStyle, cursor: 'default', opacity: 0.6 }}>No synonyms found</div>
-            )}
-          </>
-        )}
         
         {/* LORE OPERATIONS (only show if text is selected) */}
         {selectedText && (

@@ -230,6 +230,18 @@ const EditorLayout = () => {
 
   // --- NEW: Right-Click Handler ---
   const handleContextMenu = (e) => {
+    // Check if we're running in Electron
+    const isElectron = window.electronAPI !== undefined;
+    
+    // If in Electron, check if clicking on a misspelled word
+    if (isElectron) {
+      // Don't prevent default - let Electron's spell check menu show
+      // Only show custom menu if there's text selected
+      if (!editor || !editor.state.selection || editor.state.selection.empty) {
+        return; // Let native menu show
+      }
+    }
+    
     e.preventDefault(); // Prevent browser's default menu
     
     setContextMenu({
