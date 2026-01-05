@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom'; // Needed to reset view on New Project
 import { useProject } from '../context/ProjectContext';
+import { dbSet } from '../context/projectDb'; // For manual save before reload
 import CompileModal from './CompileModal';
 import ExportLoreModal from './ExportLoreModal';
 import CustomModal from './CustomModal'; // <--- We need the modal for New/Save As
@@ -319,7 +320,9 @@ const MenuBar = ({ toggleTheme, isZenMode, toggleZenMode }) => {
                   Keep Auto-Save ON (Recommended)
                 </button>
                 <button
-                  onClick={() => {
+                  onClick={async () => {
+                    // Save current state before disabling
+                    await dbSet('seymour_data', projectData);
                     localStorage.setItem('autoSaveEnabled', 'false');
                     setShowAutoSaveWarning(false);
                     window.location.reload();
@@ -353,7 +356,9 @@ const MenuBar = ({ toggleTheme, isZenMode, toggleZenMode }) => {
                   Cancel
                 </button>
                 <button
-                  onClick={() => {
+                  onClick={async () => {
+                    // Save current state before enabling auto-save
+                    await dbSet('seymour_data', projectData);
                     localStorage.setItem('autoSaveEnabled', 'true');
                     setShowAutoSaveWarning(false);
                     window.location.reload();
