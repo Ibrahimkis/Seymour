@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom'; // Needed to reset view on New Project
 import { useProject } from '../context/ProjectContext';
 import CompileModal from './CompileModal';
+import ExportLoreModal from './ExportLoreModal';
 import CustomModal from './CustomModal'; // <--- We need the modal for New/Save As
 
 // --- DEFAULT EMPTY STATE ---
@@ -30,6 +31,7 @@ const MenuBar = ({ toggleTheme, isZenMode, toggleZenMode }) => {
   // --- STATE ---
   const [activeMenu, setActiveMenu] = useState(null);
   const [showCompile, setShowCompile] = useState(false);
+  const [showExportLore, setShowExportLore] = useState(false);
   
   // Modal State for New/Save As
   const [modal, setModal] = useState({ isOpen: false, type: 'confirm', title: '', message: '', onConfirm: () => {} });
@@ -143,6 +145,7 @@ const MenuBar = ({ toggleTheme, isZenMode, toggleZenMode }) => {
     <>
       {/* GLOBAL MODALS */}
       <CompileModal isOpen={showCompile} onClose={() => setShowCompile(false)} />
+      <ExportLoreModal isOpen={showExportLore} onClose={() => setShowExportLore(false)} />
       
       <CustomModal 
         isOpen={modal.isOpen}
@@ -181,6 +184,9 @@ const MenuBar = ({ toggleTheme, isZenMode, toggleZenMode }) => {
             <div style={{height: 1, background: '#444', margin: '5px 0'}}></div>
             <button style={dropdownItemStyle} onClick={() => { setShowCompile(true); setActiveMenu(null); }}>
                🖨️ Compile Manuscript...
+            </button>
+            <button style={dropdownItemStyle} onClick={() => { setShowExportLore(true); setActiveMenu(null); }}>
+               📚 Export Lore Cards...
             </button>
           </Menu>
 

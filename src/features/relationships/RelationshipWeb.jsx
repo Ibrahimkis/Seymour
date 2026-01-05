@@ -5,19 +5,29 @@ import CustomModal from '../../components/CustomModal';
 const RelationshipWeb = () => {
   const { projectData, setProjectData } = useProject();
   
-  // --- 1. DATA MIGRATION & INITIALIZATION ---
-  const rawData = projectData.relationships || { nodes: [], edges: [] };
-  
-  const graphs = Array.isArray(rawData) 
-    ? rawData 
-    : [ { id: 'default', name: 'Main Web', nodes: rawData.nodes || [], edges: rawData.edges || [] } ];
+  // --- 1. DATA MIGRATION & INITIALIZATION (FIXED) ---
+  const rawData = projectData?.relationships;
+
+  let graphs = [];
+
+  // Logic: Ensure we always have an array with at least one graph
+  if (Array.isArray(rawData) && rawData.length > 0) {
+    graphs = rawData;
+  } else if (rawData && !Array.isArray(rawData) && (rawData.nodes || rawData.edges)) {
+    // Convert old single-object format to array format
+    graphs = [{ id: 'default', name: 'Main Web', nodes: rawData.nodes || [], edges: rawData.edges || [] }];
+  } else {
+    // Default fallback if empty or null (Prevents the crash)
+    graphs = [{ id: 'default', name: 'Main Web', nodes: [], edges: [] }];
+  }
 
   // --- STATE ---
-  const [activeGraphId, setActiveGraphId] = useState(graphs[0].id);
+  // Fix: Ensure graphs[0] exists before accessing .id
+  const [activeGraphId, setActiveGraphId] = useState(graphs[0]?.id || 'default');
   
   const currentGraph = graphs.find(g => g.id === activeGraphId) || graphs[0];
-  const activeNodes = currentGraph.nodes || [];
-  const activeEdges = currentGraph.edges || [];
+  const activeNodes = currentGraph?.nodes || [];
+  const activeEdges = currentGraph?.edges || [];
 
   // Canvas State
   const [scale, setScale] = useState(1);
@@ -48,7 +58,7 @@ const RelationshipWeb = () => {
         const newGraph = { id: Date.now(), name: name || 'Untitled Web', nodes: [], edges: [] };
         setProjectData(prev => ({ 
           ...prev, 
-          relationships: [...(Array.isArray(prev.relationships) ? prev.relationships : graphs), newGraph] 
+          relationships: [...graphs, newGraph] 
         }));
         setActiveGraphId(newGraph.id);
         setPan({ x: 0, y: 0 }); setScale(1); 
@@ -168,7 +178,8 @@ const RelationshipWeb = () => {
   };
 
   // --- RENDER HELPERS ---
-  const characters = projectData.lore.characters || [];
+  const characters = projectData?.lore?.characters || []; // Safety check
+  
   const getUnplacedCharacters = () => {
     const placedIds = new Set(activeNodes.map(n => n.id));
     return characters.filter(c => !placedIds.has(c.id));
@@ -186,7 +197,7 @@ const RelationshipWeb = () => {
 
       {/* --- TAB BAR --- */}
       <div style={tabBarStyle}>
-        <div style={{ display: 'flex', gap: '2px', overflowX: 'auto', flex: 1 }}>
+        <div style={{ display: 'flex', gap: '2px', overflowX: 'auto', flex: 1 }} className="custom-scrollbar">
           {graphs.map(graph => (
             <div 
               key={graph.id}
@@ -207,9 +218,9 @@ const RelationshipWeb = () => {
           ))}
         </div>
         
-        {/* NEW BUTTON (UPDATED) */}
+        {/* NEW BUTTON */}
         <button onClick={createNewTab} style={newTabBtnStyle}>
-          + Add a new Web
+          + New Web
         </button>
       </div>
 
@@ -218,17 +229,17 @@ const RelationshipWeb = () => {
         
         {/* SIDEBAR */}
         <div style={sidebarStyle}>
-          <div style={{fontWeight:'bold', paddingBottom: '10px', borderBottom:'1px solid #333', marginBottom:'10px', color:'var(--accent)'}}>
+          <div style={{fontWeight:'bold', paddingBottom: '10px', borderBottom:'1px solid var(--border)', marginBottom:'10px', color:'var(--accent)', fontSize: '11px', letterSpacing: '1px'}}>
             UNPLACED CHARACTERS
           </div>
-          <div style={{ overflowY: 'auto', flex: 1 }}>
+          <div style={{ overflowY: 'auto', flex: 1 }} className="custom-scrollbar">
             {getUnplacedCharacters().map(char => (
               <div key={char.id} style={sidebarItemStyle}>
                 <span>{char.name}</span>
                 <button onClick={() => addNodeToBoard(char.id)} style={addBtn}>+</button>
               </div>
             ))}
-            {getUnplacedCharacters().length === 0 && <div style={{color:'#555', fontSize:'12px'}}>All active characters placed.</div>}
+            {getUnplacedCharacters().length === 0 && <div style={{color:'#555', fontSize:'12px', fontStyle:'italic'}}>All characters placed.</div>}
           </div>
         </div>
 
@@ -256,6 +267,9 @@ const RelationshipWeb = () => {
               {activeEdges.map(edge => {
                 const start = getNodeCenter(edge.source);
                 const end = getNodeCenter(edge.target);
+                // Safety check if node was deleted but edge remains
+                if (start.x === 0 || end.x === 0) return null; 
+                
                 return (
                   <g key={edge.id} pointerEvents="auto" onClick={() => deleteEdge(edge.id)} style={{cursor: 'pointer'}}>
                     <line x1={start.x} y1={start.y} x2={end.x} y2={end.y} stroke="#555" strokeWidth="2" markerEnd="url(#arrowhead)" />
@@ -269,7 +283,8 @@ const RelationshipWeb = () => {
             {/* NODES */}
             {activeNodes.map(node => {
               const char = characters.find(c => c.id === node.id);
-              if (!char) return null;
+              if (!char) return null; // Safe check for ghost nodes
+              
               const isSource = connectionStart === node.id;
               return (
                 <div key={node.id} className="node-card" onMouseDown={(e) => startDragNode(e, node.id, node.x, node.y)}
@@ -295,7 +310,14 @@ const RelationshipWeb = () => {
         </div>
       </div>
       
-      <style>{` .node-card:hover .node-delete { opacity: 1 !important; } `}</style>
+      <style>{` 
+        .node-card:hover .node-delete { opacity: 1 !important; } 
+        /* Custom Scrollbar for Sidebar */
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; height: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: transparent; }
+        .custom-scrollbar:hover::-webkit-scrollbar-thumb { background: #444; border-radius: 2px; }
+      `}</style>
     </div>
   );
 };
@@ -305,22 +327,13 @@ const tabBarStyle = { height: '36px', background: 'var(--bg-header)', borderBott
 const tabStyle = { padding: '0 15px', height: '100%', display: 'flex', alignItems: 'center', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', borderRight: '1px solid var(--border)', position: 'relative', whiteSpace: 'nowrap' };
 const closeTabStyle = { marginLeft: '8px', fontSize: '14px', color: '#666', cursor: 'pointer' };
 
-// Updated Button Style
 const newTabBtnStyle = { 
-  background: 'none', 
-  border: 'none', 
-  color: 'var(--accent)', 
-  fontSize: '12px', 
-  fontWeight: 'bold', 
-  cursor: 'pointer', 
-  padding: '0 10px',
-  display: 'flex',
-  alignItems: 'center',
-  whiteSpace: 'nowrap'
+  background: 'none', border: 'none', color: 'var(--accent)', fontSize: '12px', 
+  fontWeight: 'bold', cursor: 'pointer', padding: '0 10px', display: 'flex', alignItems: 'center', whiteSpace: 'nowrap'
 };
 
 const sidebarStyle = { width: '220px', background: 'var(--bg-panel)', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', padding: '15px', zIndex: 20 };
-const sidebarItemStyle = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px', background: 'var(--bg-app)', marginBottom: '5px', borderRadius: '4px', border: '1px solid #333', fontSize: '13px' };
+const sidebarItemStyle = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px', background: 'var(--bg-app)', marginBottom: '5px', borderRadius: '4px', border: '1px solid var(--border)', fontSize: '13px' };
 const addBtn = { background: 'var(--bg-header)', border: '1px solid #555', cursor: 'pointer', color: 'var(--accent)', borderRadius: '3px', fontWeight: 'bold', width: '20px' };
 const toolbarStyle = { position: 'absolute', top: 10, left: 10, zIndex: 100, display: 'flex', gap: '10px' };
 const toolBtn = { padding: '8px 12px', background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px', color: 'var(--text-main)', boxShadow: '0 2px 5px rgba(0,0,0,0.3)' };

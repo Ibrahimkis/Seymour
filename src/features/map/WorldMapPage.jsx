@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import MapCanvas from '../../components/MapCanvas'; 
 import CustomModal from '../../components/CustomModal';
 import { useProject } from '../../context/ProjectContext';
+import { compressImage } from '../../utils/imageCompression';
 
 const WorldMapPage = () => {
   const { projectData, setProjectData } = useProject();
@@ -84,14 +85,23 @@ const WorldMapPage = () => {
   };
 
   // --- MAP HANDLERS ---
-  const handleMapUpload = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => { updateCurrentMap({ imageSrc: reader.result }); };
-      reader.readAsDataURL(file);
-    }
-  };
+  const handleMapUpload = async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  
+  const fileSizeMB = (file.size / 1024 / 1024).toFixed(2);
+  console.log(`📁 Original map size: ${fileSizeMB}MB`);
+  
+  try {
+    // For maps, use higher resolution since detail matters
+    const compressedImage = await compressImage(file, 1920, 1920, 0.8);
+    updateCurrentMap({ imageSrc: compressedImage });
+    
+  } catch (err) {
+    console.error('Map compression failed:', err);
+    alert('Failed to upload map. Please try a smaller file.');
+  }
+};
 
   const handleAddPin = (newPin) => {
     const pinWithId = { ...newPin, id: newPin.id || Date.now() };

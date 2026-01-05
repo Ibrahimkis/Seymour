@@ -1,5 +1,4 @@
-import React, { useState, useEffect } from 'react';
-// REMOVED 'BubbleMenu' from this import to fix the crash
+import React, { useState, useEffect, useRef } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react'; 
 import StarterKit from '@tiptap/starter-kit';
 import Underline from '@tiptap/extension-underline';
@@ -16,7 +15,8 @@ import EditorToolbar from './EditorToolbar';
 import EditorFooter from './EditorFooter'; 
 import LoreHoverCard from './LoreHoverCard'; 
 import TypographyControls from './TypographyControls'; 
-import ChapterInspector from './ChapterInspector'; 
+import ChapterInspector from './ChapterInspector';
+import EditorContextMenu from './EditorContextMenu'; // <--- NEW IMPORT
 import { useProject } from '../../context/ProjectContext';
 import { LoreMark } from './LoreExtension';
 
@@ -43,6 +43,18 @@ const EditorLayout = () => {
   const [isTypewriterMode, setIsTypewriterMode] = useState(false);
   const [isFocusMode, setIsFocusMode] = useState(false);
   const [showInspector, setShowInspector] = useState(true);
+  
+  // --- NEW: Context Menu State ---
+  const [contextMenu, setContextMenu] = useState(null);
+
+  const [localTitle, setLocalTitle] = useState(chapter?.title || '');
+  const titleSaveTimer = useRef(null);
+
+  useEffect(() => {
+    if (chapter) {
+      setLocalTitle(chapter.title);
+    }
+  }, [chapter?.id]);
 
   // --- CUSTOM FONT LOADER ---
   useEffect(() => {
@@ -70,12 +82,15 @@ const EditorLayout = () => {
         mode: 'all',
       }),
       BubbleMenuExtension.configure({
-        element: null, // We handle the render manually below
+        element: null,
       }),
     ],
     content: chapter?.content || '',
     editorProps: { 
-      attributes: { class: 'seymour-editor' },
+      attributes: { 
+        class: 'seymour-editor',
+        spellcheck: 'true' // <--- ENABLE SPELL CHECK
+      },
     },
     onUpdate: () => {
       if (autoSaveEnabled) setStatus('Unsaved changes...');
@@ -108,14 +123,12 @@ const EditorLayout = () => {
     },
   });
 
-  // Keep contents in sync
   useEffect(() => {
     if (editor && chapter && editor.getHTML() !== chapter.content) {
       editor.commands.setContent(chapter.content);
     }
   }, [chapter?.id, editor]);
 
-  // Saving Logic
   useEffect(() => {
     if (!editor || !autoSaveEnabled) return;
     const saveTimer = setTimeout(() => {
@@ -134,19 +147,34 @@ const EditorLayout = () => {
   };
 
   const handleTitleChange = (e) => {
+    const newTitle = e.target.value;
+    setLocalTitle(newTitle);
+    setStatus('Unsaved changes...');
+    
+    if (titleSaveTimer.current) {
+      clearTimeout(titleSaveTimer.current);
+    }
+    
     if (autoSaveEnabled) {
-        setStatus('Unsaved changes...');
-        saveChapter(editor?.getHTML(), e.target.value);
+      titleSaveTimer.current = setTimeout(() => {
+        saveChapter(editor?.getHTML(), newTitle);
+        setStatus('Saved');
+      }, 1500);
     }
   };
 
-  // --- SMART LINKS ---
+  const handleManualSave = () => {
+    if (editor) {
+      saveChapter(editor.getHTML(), localTitle);
+      setStatus('Saved');
+    }
+  };
+
   const applySmartLinks = () => {
     if (!editor || !projectData.lore.characters) return;
     const chain = editor.chain().focus();
     
     projectData.lore.characters.forEach(char => {
-      // Name + Aliases
       const terms = [char.name, ...(char.aliases || [])];
 
       terms.forEach(term => {
@@ -200,7 +228,46 @@ const EditorLayout = () => {
     }
   };
 
-  // --- MANUAL BUBBLE MENU ---
+  // --- NEW: Right-Click Handler ---
+  const handleContextMenu = (e) => {
+    e.preventDefault(); // Prevent browser's default menu
+    
+    setContextMenu({
+      x: e.clientX,
+      y: e.clientY
+    });
+  };
+
+  // --- NEW: Close context menu on click ---
+  useEffect(() => {
+    const handleClick = () => setContextMenu(null);
+    document.addEventListener('click', handleClick);
+    return () => document.removeEventListener('click', handleClick);
+  }, []);
+
+  // --- NEW: Ctrl + Mouse Wheel Zoom ---
+  useEffect(() => {
+    const handleWheel = (e) => {
+      // Check if Ctrl is pressed and we're in the editor workspace
+      if (e.ctrlKey && e.target.closest('#editor-workspace')) {
+        e.preventDefault(); // Prevent browser zoom
+        
+        const delta = e.deltaY > 0 ? -10 : 10; // Negative delta = zoom in
+        const newZoom = Math.max(50, Math.min(200, settings.zoom + delta));
+        
+        // Update the zoom setting
+        const newSettings = { ...settings, zoom: newZoom };
+        setProjectData({
+          ...projectData,
+          settings: newSettings
+        });
+      }
+    };
+
+    document.addEventListener('wheel', handleWheel, { passive: false });
+    return () => document.removeEventListener('wheel', handleWheel);
+  }, [settings, projectData, setProjectData]);
+
   const CustomBubbleMenu = ({ editor }) => {
     const [visible, setVisible] = useState(false);
     const [pos, setPos] = useState({ left: 0, top: 0 });
@@ -257,10 +324,17 @@ const EditorLayout = () => {
             <button onClick={() => setIsTypewriterMode(!isTypewriterMode)} style={isTypewriterMode ? activeMagicBtnStyle : magicBtnStyle} title="Typewriter Mode">⌨️</button>
             <button onClick={() => setIsFocusMode(!isFocusMode)} style={isFocusMode ? activeMagicBtnStyle : magicBtnStyle} title="Focus Mode">🎯</button>
             <button onClick={applySmartLinks} style={magicBtnStyle} title="Scan for Lore">🪄 Link Lore</button>
-            <button onClick={() => setShowInspector(!showInspector)} style={showInspector ? activeMagicBtnStyle : magicBtnStyle} title="Chapter Inspector">📑</button>
+            <button onClick={() => setShowInspector(!showInspector)} style={showInspector ? activeMagicBtnStyle : magicBtnStyle} title="Chapter Inspector">🔎</button>
         </div>
         <div style={rightStatusAreaStyle}>
           <span style={{ color: status === 'Saved' ? 'var(--text-muted)' : 'var(--accent)' }}>{status}</span>
+          
+          {!autoSaveEnabled && (
+            <button onClick={handleManualSave} style={manualSaveBtnStyle}>
+              💾 Save Now
+            </button>
+          )}
+          
           <label style={{ display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer', userSelect: 'none' }}>
             <input type="checkbox" checked={autoSaveEnabled} onChange={(e) => setAutoSaveEnabled(e.target.checked)} style={{ cursor: 'pointer' }} />
             <span style={{ color: 'var(--text-main)' }}>Auto-Save</span>
@@ -275,13 +349,20 @@ const EditorLayout = () => {
           id="editor-workspace" 
           style={workspaceStyle} 
           className={`${isTypewriterMode ? 'typewriter-active' : ''} ${isFocusMode ? 'focus-mode-active' : ''}`}
+          onContextMenu={handleContextMenu} // <--- RIGHT-CLICK HANDLER
         >
           <div style={{
             ...pageContainerStyle,
             transform: `scale(${settings.zoom / 100})`,
             transformOrigin: 'top center'
           }} onMouseMove={handlePageMouseMove} onDoubleClick={handleDoubleClick}>
-            <input type="text" value={chapter.title || ''} onChange={handleTitleChange} style={titleInputStyle} placeholder="Chapter Title" />
+            <input 
+              type="text" 
+              value={localTitle} 
+              onChange={handleTitleChange} 
+              style={titleInputStyle} 
+              placeholder="Chapter Title" 
+            />
             <div style={{
               ...editorWrapperStyle,
               fontSize: `${settings.fontSize}px`,
@@ -293,34 +374,34 @@ const EditorLayout = () => {
           </div>
         </div>
 
-        {/* CHAPTER INSPECTOR */}
         {showInspector && <ChapterInspector chapterId={chapter.id} />}
         
       </div>
 
       <EditorFooter editor={editor} />
+      
+      {/* CONTEXT MENU */}
+      {contextMenu && (
+        <EditorContextMenu 
+          editor={editor}
+          position={contextMenu}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
     </div>
   );
 };
 
 // --- STYLES ---
-
 const centeredHeaderStyle = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--bg-header)', borderBottom: '1px solid var(--border)', height: '45px', padding: '0 15px', flexShrink: 0 };
 const rightStatusAreaStyle = { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '15px', fontSize: '12px' };
 const workspaceStyle = { flex: 1, background: 'var(--bg-app)', overflowY: 'auto', padding: '0', display: 'block', scrollBehavior: 'smooth' };
-
-// REMOVED BOX SHADOW HERE
-const pageContainerStyle = { 
-  width: '800px', maxWidth: '100%', minHeight: '1000px', height: 'auto', 
-  background: 'var(--paper)', 
-  boxShadow: 'none', // <--- UPDATED
-  padding: '100px 80px', borderRadius: '2px', margin: '0 auto', transition: 'transform 0.2s ease' 
-};
-
+const pageContainerStyle = { width: '800px', maxWidth: '100%', minHeight: '1000px', height: 'auto', background: 'var(--paper)', boxShadow: 'none', padding: '100px 80px', borderRadius: '2px', margin: '0 auto', transition: 'transform 0.2s ease' };
 const titleInputStyle = { width: '100%', background: 'transparent', border: 'none', borderBottom: '1px dashed var(--border)', fontSize: '28px', fontWeight: 'bold', color: 'var(--text-main)', marginBottom: '30px', outline: 'none', paddingBottom: '10px', textAlign: 'center' };
 const editorWrapperStyle = { color: 'var(--text-main)', lineHeight: '1.8' };
 const magicBtnStyle = { background: 'none', border: '1px solid var(--accent)', color: 'var(--accent)', borderRadius: '4px', padding: '4px 8px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' };
 const activeMagicBtnStyle = { ...magicBtnStyle, background: 'var(--accent)', color: 'white' };
+const manualSaveBtnStyle = { background: 'var(--accent)', border: 'none', color: 'white', borderRadius: '4px', padding: '4px 10px', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' };
 const bubbleMenuStyle = { background: '#111', border: '1px solid #444', borderRadius: '6px', display: 'flex', padding: '2px', boxShadow: '0 8px 24px rgba(0,0,0,0.5)' };
 const bubbleBtn = { background: 'transparent', border: 'none', color: '#ccc', padding: '5px 10px', cursor: 'pointer', fontWeight: 'bold' };
 const activeBubbleBtn = { ...bubbleBtn, color: 'var(--accent)' };
@@ -336,6 +417,18 @@ styleTag.innerHTML = `
   .focus-mode-active .seymour-editor .has-focus { opacity: 1 !important; }
   .focus-mode-active .ProseMirror-focused .has-focus { opacity: 1 !important; }
   .seymour-editor { outline: none; }
+  
+  /* Lore link styling */
+  .lore-link {
+    color: var(--accent);
+    border-bottom: 1px dotted var(--accent);
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .lore-link:hover {
+    background: rgba(92, 139, 214, 0.1);
+    border-bottom-style: solid;
+  }
 `;
 document.head.appendChild(styleTag);
 

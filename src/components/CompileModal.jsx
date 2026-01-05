@@ -12,6 +12,7 @@ const CompileModal = ({ isOpen, onClose }) => {
     includeTitles: true,
     pageBreaks: true,
   });
+  const [showAlertModal, setShowAlertModal] = useState(false);
 
   // Initialize selection when modal opens
   useEffect(() => {
@@ -112,7 +113,7 @@ const CompileModal = ({ isOpen, onClose }) => {
   const handleCompile = () => {
     const content = generateContent();
     if (!content) {
-      alert("Please select at least one chapter.");
+      setShowAlertModal(true);
       return;
     }
 
@@ -235,6 +236,15 @@ const CompileModal = ({ isOpen, onClose }) => {
           </button>
         </div>
       </div>
+
+      {/* Alert Modal */}
+      <CustomModal
+        isOpen={showAlertModal}
+        type="alert"
+        title="Selection Required"
+        message="Please select at least one chapter to export."
+        onConfirm={() => setShowAlertModal(false)}
+      />
     </div>
   );
 };

@@ -16,7 +16,94 @@ const COLORS = [
   { id: 'black', val: '#222222', title: 'Black' },
 ];
 
-const CLUSTER_DIST = 5; 
+const CLUSTER_DIST = 5;
+
+// --- OPTIMIZED CLUSTERING ALGORITHM ---
+// Uses spatial grid for O(n) instead of O(n²)
+const clusterPins = (pins, scale) => {
+  if (!pins || pins.length === 0) return [];
+  
+  const threshold = CLUSTER_DIST / scale;
+  const gridSize = threshold * 2; // Grid cell size
+  const grid = new Map(); // Spatial hash grid
+  
+  // Helper: Get grid cell key
+  const getCell = (x, y) => {
+    const cellX = Math.floor(x / gridSize);
+    const cellY = Math.floor(y / gridSize);
+    return `${cellX},${cellY}`;
+  };
+  
+  // Helper: Get neighboring cells (9 cells including current)
+  const getNeighborCells = (x, y) => {
+    const cellX = Math.floor(x / gridSize);
+    const cellY = Math.floor(y / gridSize);
+    const cells = [];
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        cells.push(`${cellX + dx},${cellY + dy}`);
+      }
+    }
+    return cells;
+  };
+  
+  // Add all pins to grid
+  pins.forEach((pin, index) => {
+    const cell = getCell(pin.x, pin.y);
+    if (!grid.has(cell)) grid.set(cell, []);
+    grid.get(cell).push({ ...pin, originalIndex: index, clustered: false });
+  });
+  
+  const clusters = [];
+  
+  // Process each pin
+  pins.forEach((pin, index) => {
+    const neighborCells = getNeighborCells(pin.x, pin.y);
+    let currentCluster = null;
+    
+    // Check all pins in neighboring cells
+    for (const cellKey of neighborCells) {
+      const cellPins = grid.get(cellKey);
+      if (!cellPins) continue;
+      
+      for (const otherPin of cellPins) {
+        if (otherPin.clustered) continue;
+        
+        // Calculate distance
+        const dx = pin.x - otherPin.x;
+        const dy = pin.y - otherPin.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        
+        if (dist < threshold) {
+          if (!currentCluster) {
+            currentCluster = [otherPin];
+            otherPin.clustered = true;
+          } else if (!otherPin.clustered) {
+            currentCluster.push(otherPin);
+            otherPin.clustered = true;
+          }
+        }
+      }
+    }
+    
+    if (currentCluster && currentCluster.length > 0) {
+      clusters.push(currentCluster);
+    }
+  });
+  
+  // Add unclustered pins as single-pin clusters
+  pins.forEach((pin, index) => {
+    const cell = getCell(pin.x, pin.y);
+    const cellPins = grid.get(cell);
+    const pinData = cellPins?.find(p => p.originalIndex === index);
+    
+    if (pinData && !pinData.clustered) {
+      clusters.push([{ ...pin, originalIndex: index }]);
+    }
+  });
+  
+  return clusters;
+};
 
 const MapCanvas = ({ mapImage, pins = [], onAddPin, onRemovePin, onPinClick, allEntities }) => {
   const containerRef = useRef(null);
@@ -26,45 +113,18 @@ const MapCanvas = ({ mapImage, pins = [], onAddPin, onRemovePin, onPinClick, all
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-
-  // --- SELECTION & HIGHLIGHT ---
-  const [isSelecting, setIsSelecting] = useState(false); 
-  const [tempPin, setTempPin] = useState(null); 
+  const [isSelecting, setIsSelecting] = useState(false);
+  const [tempPin, setTempPin] = useState(null);
   const [selectedEntityId, setSelectedEntityId] = useState("");
   const [selectedColor, setSelectedColor] = useState(COLORS[0].val);
   const [highlightedPinId, setHighlightedPinId] = useState(null);
 
-  // --- CLUSTERING ---
+  // --- OPTIMIZED CLUSTERING with useMemo ---
   const clusters = useMemo(() => {
-    if (!pins.length) return [];
-    let processed = pins.map((p, i) => ({ ...p, originalIndex: i, processed: false }));
-    const result = [];
-    const threshold = CLUSTER_DIST / scale; 
-
-    for (let i = 0; i < processed.length; i++) {
-      if (processed[i].processed) continue;
-      const cluster = [processed[i]];
-      processed[i].processed = true;
-
-      for (let j = i + 1; j < processed.length; j++) {
-        if (processed[j].processed) continue;
-        const p1 = processed[i];
-        const p2 = processed[j];
-        const dx = p1.x - p2.x;
-        const dy = p1.y - p2.y;
-        const dist = Math.sqrt(dx*dx + dy*dy);
-
-        if (dist < threshold) {
-          cluster.push(processed[j]);
-          processed[j].processed = true;
-        }
-      }
-      result.push(cluster);
-    }
-    return result;
+    return clusterPins(pins, scale);
   }, [pins, scale]);
 
-  // --- GROUP PINS FOR KEY LOG ---
+  // --- MEMOIZED GROUP PINS FOR KEY LOG ---
   const groupedPins = useMemo(() => {
     const groups = {};
     pins.forEach(pin => {
@@ -91,14 +151,21 @@ const MapCanvas = ({ mapImage, pins = [], onAddPin, onRemovePin, onPinClick, all
     setScale(clampedScale);
   }, [scale, pan]);
 
-  // --- WHEEL HANDLER ---
+  // --- WHEEL HANDLER (Throttled for performance) ---
+  const lastWheelTime = useRef(0);
   useEffect(() => {
     const node = containerRef.current;
     if (!node) return;
 
     const onWheel = (e) => {
-      e.preventDefault(); 
+      e.preventDefault();
       e.stopPropagation();
+      
+      // Throttle to max 60fps
+      const now = Date.now();
+      if (now - lastWheelTime.current < 16) return;
+      lastWheelTime.current = now;
+      
       const rect = node.getBoundingClientRect();
       const mouseX = e.clientX - rect.left;
       const mouseY = e.clientY - rect.top;
@@ -110,7 +177,7 @@ const MapCanvas = ({ mapImage, pins = [], onAddPin, onRemovePin, onPinClick, all
 
     node.addEventListener('wheel', onWheel, { passive: false });
     return () => node.removeEventListener('wheel', onWheel);
-  }, [scale, performZoom]); 
+  }, [scale, performZoom]);
 
   // --- MOUSE HANDLERS ---
   const handleZoomBtn = (direction) => {
@@ -149,8 +216,8 @@ const MapCanvas = ({ mapImage, pins = [], onAddPin, onRemovePin, onPinClick, all
 
     setTempPin({ x: xPercent, y: yPercent });
     setIsSelecting(true);
-    setSelectedEntityId(""); 
-    setSelectedColor(COLORS[0].val); 
+    setSelectedEntityId("");
+    setSelectedColor(COLORS[0].val);
   };
 
   const confirmPin = () => {
@@ -166,7 +233,7 @@ const MapCanvas = ({ mapImage, pins = [], onAddPin, onRemovePin, onPinClick, all
       {/* 1. KEY LOG (Top) */}
       <div style={keyLogContainerStyle} className="key-log custom-scrollbar" onWheel={(e) => e.stopPropagation()}>
         <div style={{ fontSize: '10px', fontWeight: 'bold', color: 'var(--text-muted)', marginBottom: '10px', letterSpacing: '1px', borderBottom:'1px solid #333', paddingBottom:'5px', position: 'sticky', top: 0, background: 'var(--bg-panel)', zIndex: 10 }}>
-          MAP KEY (Grouped by Color)
+          MAP KEY (Grouped by Color) • {pins.length} pins
         </div>
         
         <div style={{ display: 'flex', gap: '30px', flexWrap: 'wrap', alignContent: 'flex-start' }}>
@@ -227,7 +294,8 @@ const MapCanvas = ({ mapImage, pins = [], onAddPin, onRemovePin, onPinClick, all
             transformOrigin: '0 0',
             transition: isDragging ? 'none' : 'transform 0.1s ease-out',
             width: '100%', height: '100%',
-            cursor: isDragging ? 'grabbing' : 'crosshair'
+            cursor: isDragging ? 'grabbing' : 'crosshair',
+            willChange: 'transform' // GPU acceleration hint
           }}
         >
           {mapImage ? (
@@ -236,13 +304,12 @@ const MapCanvas = ({ mapImage, pins = [], onAddPin, onRemovePin, onPinClick, all
             <div style={{ color: '#666', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Upload Map to Begin</div>
           )}
 
+          {/* RENDER CLUSTERS */}
           {clusters.map((cluster, cIndex) => {
             const x = cluster.reduce((sum, p) => sum + p.x, 0) / cluster.length;
             const y = cluster.reduce((sum, p) => sum + p.y, 0) / cluster.length;
             
-            // --- LOGIC CHANGE: Check if this cluster holds the highlighted pin ---
             const containsHighlight = cluster.some(p => p.id === highlightedPinId);
-            
             const isCluster = cluster.length > 1;
 
             if (isCluster) {
@@ -253,15 +320,13 @@ const MapCanvas = ({ mapImage, pins = [], onAddPin, onRemovePin, onPinClick, all
                   style={{
                     ...pinWrapperStyle,
                     left: `${x}%`, top: `${y}%`,
-                    transform: `translate(-50%, -50%) scale(${1 / scale})`, 
-                    // Make it pop on top if it contains the search result
+                    transform: `translate(-50%, -50%) scale(${1 / scale})`,
                     zIndex: containsHighlight ? 200 : 50
                   }}
                 >
                   <div 
                     style={{
                       ...clusterBubbleStyle,
-                      // VISUAL HIGHLIGHT: Gold Border & Glow if it contains the target
                       border: containsHighlight ? '3px solid #f1c40f' : '2px solid var(--accent)',
                       background: containsHighlight ? '#222' : 'rgba(255, 255, 255, 0.9)',
                       color: containsHighlight ? '#f1c40f' : 'black',

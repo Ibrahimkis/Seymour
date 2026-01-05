@@ -4,6 +4,7 @@ import AutoResizeTextarea from '../../components/AutoResizeTextarea';
 import ImageEditorModal from '../../components/ImageEditorModal';
 import { useProject } from '../../context/ProjectContext'; 
 import CustomModal from '../../components/CustomModal'; 
+import { compressImage } from '../../utils/imageCompression';
 
 // ==========================================
 // PART 1: THE EXPLORER
@@ -184,15 +185,32 @@ const CharacterSheet = ({ character, projectData, setProjectData, charIndex }) =
   };
   const folderOptions = getFolderOptions();
   
-  const handleFileSelect = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => { setTempImageSrc(reader.result); setIsEditingImage(true); };
-      reader.readAsDataURL(file);
-      e.target.value = '';
-    }
-  };
+  const handleFileSelect = async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  
+  // Check file size
+  const fileSizeMB = (file.size / 1024 / 1024).toFixed(2);
+  console.log(`📁 Original file size: ${fileSizeMB}MB`);
+  
+  try {
+    // Show loading state (optional)
+    // You could add a loading spinner here
+    
+    // Compress the image
+    const compressedImage = await compressImage(file, 600, 600, 0.75);
+    
+    // Use compressed image
+    setTempImageSrc(compressedImage);
+    setIsEditingImage(true);
+    
+  } catch (err) {
+    console.error('Image compression failed:', err);
+    alert('Failed to process image. Please try a smaller file.');
+  }
+  
+  e.target.value = ''; // Reset input
+};
   const handleSaveImage = (styles) => { updateCharacter({ imageStyles: styles, imageSrc: tempImageSrc }); setIsEditingImage(false); };
 
   // BLOCKS

@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Outlet } from 'react-router-dom';
 import LeftPanel from './LeftPanel';
 import RightPanel from './RightPanel';
 import MenuBar from './MenuBar';
 import CommandPalette from './CommandPalette'; // <--- 1. Imported
+import { useProject } from '../context/ProjectContext';
 
 const Layout = ({ theme, toggleTheme }) => {
   // --- LAYOUT STATE ---
@@ -17,9 +18,44 @@ const Layout = ({ theme, toggleTheme }) => {
   const leftWidth = 220; 
   const rightWidth = 250;
 
+  const { saveToDisk } = useProject();
+
   const toggleZen = () => {
     setIsZenMode(!isZenMode);
   };
+
+  // Menu IPC handlers for native Electron menu
+  useEffect(() => {
+    if (window.electronAPI) {
+      window.electronAPI.onMenuToggleTheme(() => {
+        toggleTheme();
+      });
+
+      window.electronAPI.onMenuZenMode(() => {
+        toggleZen();
+      });
+
+      // Find functionality - could focus a search input or open command palette
+      window.electronAPI.onMenuFind(() => {
+        // For now, just log - could be enhanced to focus search
+        console.log('Find activated from menu');
+      });
+
+      // Export functionality - now handled directly in main process
+      // window.electronAPI.onMenuExport(() => {
+      //   saveToDisk();
+      // });
+    }
+
+    return () => {
+      if (window.electronAPI) {
+        window.electronAPI.removeAllListeners('menu-toggle-theme');
+        window.electronAPI.removeAllListeners('menu-zen-mode');
+        window.electronAPI.removeAllListeners('menu-find');
+        // Removed: window.electronAPI.removeAllListeners('menu-export');
+      }
+    };
+  }, [toggleTheme]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: 'var(--bg-app)', color: 'var(--text-main)', overflow: 'hidden' }}>
