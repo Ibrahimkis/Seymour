@@ -3,6 +3,11 @@ import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
+// Detect if running in Electron
+const isElectron = () => {
+  return window.electronAPI !== undefined;
+};
+
 // PASTE YOUR CONFIG FROM FIREBASE CONSOLE HERE
 const firebaseConfig = {
   apiKey: "AIzaSyD5BH-AIehT136mJz90wp3QZ1xAgA8ToIQ",
@@ -14,7 +19,17 @@ const firebaseConfig = {
   measurementId: "G-DES465RL3Y"
 };
 
-const app = initializeApp(firebaseConfig);
-export const auth = getAuth(app);
-export const googleProvider = new GoogleAuthProvider();
-export const db = getFirestore(app);
+// Only initialize Firebase if NOT running in Electron
+let app = null;
+let auth = null;
+let googleProvider = null;
+let db = null;
+
+if (!isElectron()) {
+  app = initializeApp(firebaseConfig);
+  auth = getAuth(app);
+  googleProvider = new GoogleAuthProvider();
+  db = getFirestore(app);
+}
+
+export { auth, googleProvider, db, isElectron };

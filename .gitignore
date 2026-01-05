@@ -13,7 +13,6 @@ dist-ssr
 *.local
 
 # Build outputs
-build/
 release/
 
 # Editor directories and files
