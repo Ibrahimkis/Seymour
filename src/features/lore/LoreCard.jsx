@@ -228,14 +228,27 @@ const DatabaseExplorer = ({ projectData, setProjectData, saveNowSilently, search
   };
 
   const deleteItem = (id, type) => {
-    if(!window.confirm("Delete this?")) return;
-    if(type === 'folder') {
-        const newFolders = folders.filter(f => f.id !== id);
-        setProjectData({ ...projectData, lore: { ...projectData.lore, folders: newFolders } });
-    } else {
-        const newItems = items.filter(i => i.id !== id);
-        setProjectData({ ...projectData, lore: { ...projectData.lore, characters: newItems } });
-    }
+    const itemName = type === 'folder' 
+      ? folders.find(f => f.id === id)?.name 
+      : items.find(i => i.id === id)?.name;
+    
+    setModal({
+      isOpen: true,
+      type: 'confirm',
+      title: `Delete ${type === 'folder' ? 'Folder' : 'Entity'}?`,
+      message: `Are you sure you want to delete "${itemName}"?${type === 'folder' ? ' Items inside will be moved to Unsorted.' : ''}`,
+      onConfirm: () => {
+        if(type === 'folder') {
+          const newFolders = folders.filter(f => f.id !== id);
+          const newItems = items.map(i => i.folderId === id ? { ...i, folderId: 'root_misc' } : i);
+          setProjectData({ ...projectData, lore: { ...projectData.lore, folders: newFolders, characters: newItems } });
+        } else {
+          const newItems = items.filter(i => i.id !== id);
+          setProjectData({ ...projectData, lore: { ...projectData.lore, characters: newItems } });
+        }
+        setModal({ ...modal, isOpen: false });
+      }
+    });
   };
 
   // --- IMPROVED SNIPPET FINDER ---
