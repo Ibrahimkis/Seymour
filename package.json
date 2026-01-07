@@ -1,20 +1,20 @@
 {
   "name": "seymour",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.1",
   "type": "module",
   "main": "public/electron.cjs",
-
+  "author": "I.K. Bosh",
+  "description": "The Ultimate World Building Tool",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-
     "electron:dev": "concurrently -k \"vite\" \"wait-on http://localhost:5173 && electron .\"",
-    "electron:build:win": "npm run build && electron-builder --win"
+    "electron:build:win": "npm run build && electron-builder --win",
+    "electron:build:mac": "npm run build && electron-builder --mac"
   },
-
   "dependencies": {
     "@tiptap/extension-bubble-menu": "^3.14.0",
     "@tiptap/extension-character-count": "^3.14.0",
@@ -28,17 +28,15 @@
     "@tiptap/pm": "^3.14.0",
     "@tiptap/react": "^3.14.0",
     "@tiptap/starter-kit": "^3.14.0",
-    "firebase": "^12.7.0",
     "idb": "^8.0.3",
+    "lucide-react": "^0.562.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-force-graph-2d": "^1.29.0",
     "react-router-dom": "^7.11.0"
   },
-
   "devDependencies": {
     "@eslint/js": "^9.39.1",
-    "@tauri-apps/cli": "^2.9.6",
     "@types/react": "^19.2.5",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.1",
@@ -52,7 +50,6 @@
     "vite": "^7.2.4",
     "wait-on": "^9.0.3"
   },
-
   "build": {
     "appId": "com.seymour.app",
     "productName": "Seymour",
@@ -68,7 +65,60 @@
       "main": "public/electron.cjs"
     },
     "win": {
-      "target": "nsis"
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64", "arm64"]
+        }
+      ],
+      "icon": "public/Seymourico.ico.ico",
+      "fileAssociations": [
+        {
+          "ext": "seymour",
+          "name": "Seymour Project File",
+          "description": "Seymour World Building Project",
+          "icon": "public/Seymourico.ico.ico",
+          "role": "Editor"
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["x64", "arm64"]
+        }
+      ],
+      "category": "public.app-category.productivity",
+      "icon": "public/Seymourico.icns",
+      "fileAssociations": [
+        {
+          "ext": "seymour",
+          "name": "Seymour Project File",
+          "description": "Seymour World Building Project",
+          "role": "Editor"
+        }
+      ]
+    },
+    "dmg": {
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
     }
   }
 }

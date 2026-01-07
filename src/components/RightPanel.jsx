@@ -102,7 +102,7 @@ const FolderNode = ({ folder, allFolders, allItems, level, onToggle, onCreateFol
 
 // --- MAIN PANEL ---
 const RightPanel = () => {
-  const { projectData, setProjectData } = useProject();
+  const { projectData, setProjectData, saveNowSilently } = useProject();
   const navigate = useNavigate();
   const [modal, setModal] = useState({ isOpen: false, type: 'confirm', title: '', message: '', onConfirm: () => {} });
   const [activeTab, setActiveTab] = useState('lore'); 
@@ -110,6 +110,9 @@ const RightPanel = () => {
 
   // Check for unsaved changes before navigation
   const checkAndNavigate = (path) => {
+    // Force save before navigation
+    window.dispatchEvent(new CustomEvent('force-save-all'));
+    
     const hasUnsavedChanges = sessionStorage.getItem('hasUnsavedChanges') === 'true';
     const autoSaveEnabled = localStorage.getItem('autoSaveEnabled');
     const isAutoSaveOn = autoSaveEnabled !== null ? JSON.parse(autoSaveEnabled) : true;
@@ -143,7 +146,7 @@ const RightPanel = () => {
       ];
       setProjectData({ ...projectData, lore: { ...projectData.lore, folders: seeds } });
     }
-  }, [projectData]);
+  }, []); // Only run once on mount
 
   // Actions
   const updateLore = (updates) => { setProjectData({ ...projectData, lore: { ...projectData.lore, ...updates } }); };
@@ -169,7 +172,15 @@ const RightPanel = () => {
   const createItem = (folderId) => {
     const newId = Date.now();
     const newChar = { id: newId, folderId, name: "New Entity", type: 'character', imageSrc: null, sections: [{ id: 1, title: "Identity", blocks: [] }] };
-    updateLore({ characters: [...(projectData.lore.characters || []), newChar] });
+    const nextProject = {
+      ...projectData,
+      lore: {
+        ...projectData.lore,
+        characters: [...(projectData.lore.characters || []), newChar]
+      }
+    };
+    setProjectData(nextProject);
+    saveNowSilently?.(nextProject);
     navigate(`/lore?id=${newId}`);
   };
 
@@ -260,7 +271,10 @@ const RightPanel = () => {
           <>
             <div style={headerStyle}>
               <span>OMNIBUS TREE</span>
-              <button onClick={() => createFolder(null)} className="icon-btn" style={{ fontSize: '14px', fontWeight: 'bold' }}>+📂</button>
+              <div style={{ display: 'flex', gap: '5px' }}>
+                <button onClick={() => createFolder(null)} className="icon-btn" style={{ fontSize: '14px', fontWeight: 'bold', opacity: 1 }} title="Create New Category">📂+</button>
+                <button onClick={() => createItem(null)} className="icon-btn" style={{ fontSize: '14px', fontWeight: 'bold', opacity: 1 }} title="Create New Entity">📝+</button>
+              </div>
             </div>
             
             <div style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)' }}>
@@ -347,7 +361,7 @@ const rowStyle = {
 const tabContainerStyle = { display: 'flex', borderBottom: '1px solid var(--border)' };
 const tabStyle = { flex: 1, background: 'transparent', border: 'none', color: 'var(--text-muted)', padding: '10px 5px', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold', borderBottom: '2px solid transparent' };
 const activeTabStyle = { ...tabStyle, background: 'var(--bg-header)', color: 'var(--text-main)', borderBottom: '2px solid var(--accent)' };
-const searchInputStyle = { width: '100%', background: 'var(--bg-app)', border: '1px solid var(--border)', color: 'var(--text-main)', padding: '6px', borderRadius: '4px', fontSize: '12px', outline: 'none' };
+const searchInputStyle = { width: '100%', background: 'var(--bg-app)', border: '1px solid var(--border)', color: 'var(--text-main)', padding: '6px', borderRadius: '4px', fontSize: '12px', outline: 'none', textAlign: 'center', boxSizing: 'border-box' };
 const textAreaStyle = { width: '100%', height: '100%', background: 'transparent', border: 'none', color: 'var(--text-main)', fontSize: '14px', lineHeight: '1.5', outline: 'none', resize: 'none', padding: '15px' };
 
 export default RightPanel;

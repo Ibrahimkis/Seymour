@@ -1,8 +1,19 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useProject } from '../../context/ProjectContext';
 
 const GlobalScratchpad = () => {
   const { projectData, setProjectData } = useProject();
+
+  // Listen for force save events
+  useEffect(() => {
+    const handleForceSave = () => {
+      // Force a data change to trigger save - use callback form
+      setProjectData(prev => ({ ...prev, globalNotes: prev.globalNotes || '' }));
+    };
+
+    window.addEventListener('force-save-all', handleForceSave);
+    return () => window.removeEventListener('force-save-all', handleForceSave);
+  }, [setProjectData]);
 
   const handleChange = (e) => {
     setProjectData({ ...projectData, globalNotes: e.target.value });

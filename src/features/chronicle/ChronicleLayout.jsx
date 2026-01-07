@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useProject } from '../../context/ProjectContext';
 import CustomModal from '../../components/CustomModal';
 
@@ -23,6 +23,20 @@ const ChronicleLayout = () => {
   const [isEditing, setIsEditing] = useState(false);
   const [editId, setEditId] = useState(null);
   const [formData, setFormData] = useState({ year: 0, displayDate: '', title: '', desc: '', type: 'lore' });
+
+  // Listen for force save events
+  useEffect(() => {
+    const handleForceSave = () => {
+      // Force a data change to trigger save - use callback
+      setProjectData(prev => {
+        const currentEvents = prev.timeline || [];
+        return { ...prev, timeline: [...currentEvents] };
+      });
+    };
+
+    window.addEventListener('force-save-all', handleForceSave);
+    return () => window.removeEventListener('force-save-all', handleForceSave);
+  }, [setProjectData]);
 
   // --- ACTIONS ---
   const closeModal = () => setModal({ ...modal, isOpen: false });

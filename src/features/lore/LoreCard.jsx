@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import AutoResizeTextarea from '../../components/AutoResizeTextarea';
+import LoreLinkedText from '../../components/LoreLinkedText';
 import ImageEditorModal from '../../components/ImageEditorModal';
 import { useProject } from '../../context/ProjectContext'; 
 import CustomModal from '../../components/CustomModal'; 
@@ -9,7 +10,7 @@ import { compressImage } from '../../utils/imageCompression';
 // ==========================================
 // PART 1: THE EXPLORER
 // ==========================================
-const DatabaseExplorer = ({ projectData, setProjectData, searchParams, setSearchParams }) => {
+const DatabaseExplorer = ({ projectData, setProjectData, saveNowSilently, searchParams, setSearchParams }) => {
   const currentFolderId = searchParams.get('folderId') || null;
   const folders = projectData.lore.folders || [];
   const items = projectData.lore.characters || [];
@@ -17,11 +18,176 @@ const DatabaseExplorer = ({ projectData, setProjectData, searchParams, setSearch
   const currentItems = items.filter(i => i.folderId === currentFolderId);
   const currentFolder = folders.find(f => f.id === currentFolderId);
 
+  // Calculate statistics
+  const stats = React.useMemo(() => {
+    const folderById = new Map(folders.map(f => [f.id, f]));
+
+    const getTopFolder = (folderId) => {
+      if (!folderId) return null;
+      let current = folderById.get(folderId);
+      let safety = 0;
+      while (current && current.parentId !== null && safety < 50) {
+        current = folderById.get(current.parentId);
+        safety += 1;
+      }
+      return current || null;
+    };
+
+    // Count entries by top-level folder name (Characters / Locations / Magic / etc.)
+    const categoryCounts = {};
+    items.forEach(item => {
+      const top = getTopFolder(item.folderId);
+      const name = top?.name || 'Root';
+      categoryCounts[name] = (categoryCounts[name] || 0) + 1;
+    });
+
+    const byCategory = Object.entries(categoryCounts)
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count);
+
+    return {
+      total: items.length,
+      folders: folders.length,
+      byCategory
+    };
+  }, [items, folders]);
+
   const [modal, setModal] = useState({ isOpen: false, type: 'input', title: '', onConfirm: () => {} });
 
+  // Bulk import
+  const importInputRef = useRef(null);
+
+  const inferTopLevelFolder = (folderId) => {
+    if (!folderId) return null;
+    const folderById = new Map(folders.map(f => [f.id, f]));
+    let current = folderById.get(folderId);
+    let safety = 0;
+    while (current && current.parentId !== null && safety < 50) {
+      current = folderById.get(current.parentId);
+      safety += 1;
+    }
+    return current || null;
+  };
+
+  const inferTypeFromCategory = () => {
+    if (!currentFolderId) return 'Character';
+    const top = inferTopLevelFolder(currentFolderId);
+    const name = String(top?.name || '').toLowerCase();
+    if (top?.id === 'root_char' || name.includes('character')) return 'Character';
+    if (top?.id === 'root_loc' || name.includes('location')) return 'Location';
+    // "Magic powers" and most non-character lists fit best as a Concept.
+    return 'Concept';
+  };
+
+  const parseListText = (text) => {
+    return String(text || '')
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .filter(Boolean);
+  };
+
+  const handleImportListFile = async (file) => {
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const names = parseListText(text);
+
+      if (names.length === 0) {
+        setModal({
+          isOpen: true,
+          type: 'confirm',
+          title: 'Import List',
+          message: 'No items found. Put one name per line.',
+          onConfirm: () => setModal(prev => ({ ...prev, isOpen: false })),
+        });
+        return;
+      }
+
+      const existing = new Set(items.map(i => String(i.name || '').trim().toLowerCase()).filter(Boolean));
+      const type = inferTypeFromCategory();
+
+      const newEntities = [];
+      let skipped = 0;
+
+      names.forEach((rawName, idx) => {
+        const key = rawName.toLowerCase();
+        if (existing.has(key)) {
+          skipped += 1;
+          return;
+        }
+        existing.add(key);
+        newEntities.push({
+          id: Date.now() + idx,
+          name: rawName,
+          aliases: [],
+          folderId: currentFolderId,
+          type,
+          imageSrc: null,
+          biography: '',
+          sections: [],
+        });
+      });
+
+      if (newEntities.length === 0) {
+        setModal({
+          isOpen: true,
+          type: 'confirm',
+          title: 'Import List',
+          message: 'All items already exist (no new cards created).',
+          onConfirm: () => setModal(prev => ({ ...prev, isOpen: false })),
+        });
+        return;
+      }
+
+      const nextProject = {
+        ...projectData,
+        lore: {
+          ...projectData.lore,
+          characters: [...items, ...newEntities],
+        },
+      };
+
+      setProjectData(nextProject);
+      saveNowSilently?.(nextProject);
+
+      setModal({
+        isOpen: true,
+        type: 'confirm',
+        title: 'Import Complete',
+        message: `Created ${newEntities.length} lore cards${skipped ? ` (skipped ${skipped} duplicates)` : ''}.`,
+        onConfirm: () => setModal(prev => ({ ...prev, isOpen: false })),
+      });
+    } catch (err) {
+      console.error('Import failed:', err);
+      setModal({
+        isOpen: true,
+        type: 'confirm',
+        title: 'Import Error',
+        message: 'Failed to read that file. Try a plain .txt file (UTF-8).',
+        onConfirm: () => setModal(prev => ({ ...prev, isOpen: false })),
+      });
+    }
+  };
+
+  const openImportPicker = () => {
+    if (importInputRef.current) {
+      importInputRef.current.value = '';
+      importInputRef.current.click();
+    }
+  };
+
   // --- ACTIONS ---
-  const openFolder = (folderId) => setSearchParams({ folderId });
-  const openItem = (itemId) => setSearchParams({ id: itemId });
+  const openFolder = (folderId) => {
+    // Force save before navigation
+    window.dispatchEvent(new CustomEvent('force-save-lore'));
+    setSearchParams({ folderId });
+  };
+  const openItem = (itemId) => {
+    // Force save before navigation
+    window.dispatchEvent(new CustomEvent('force-save-lore'));
+    setSearchParams({ id: itemId });
+  };
   const goUp = () => {
     if (!currentFolder) return;
     if (currentFolder.parentId === null) setSearchParams({});
@@ -48,12 +214,14 @@ const DatabaseExplorer = ({ projectData, setProjectData, searchParams, setSearch
           name: name || 'Unnamed Entity', 
           aliases: [], 
           folderId: currentFolderId,
-          type: 'Character', 
+          type: inferTypeFromCategory(), 
           imageSrc: null, 
           biography: '', // <--- NEW DEDICATED FIELD
           sections: [] // We don't need a default section anymore since Bio is separate
         };
-        setProjectData({ ...projectData, lore: { ...projectData.lore, characters: [...items, newEntity] } });
+        const nextProject = { ...projectData, lore: { ...projectData.lore, characters: [...items, newEntity] } };
+        setProjectData(nextProject);
+        saveNowSilently?.(nextProject);
         setModal({ ...modal, isOpen: false });
       }
     });
@@ -92,7 +260,77 @@ const DatabaseExplorer = ({ projectData, setProjectData, searchParams, setSearch
   return (
     <div style={{ padding: '40px', maxWidth: '1200px', margin: '0 auto' }}>
       <CustomModal isOpen={modal.isOpen} type={modal.type} title={modal.title} onConfirm={modal.onConfirm} onCancel={() => setModal({...modal, isOpen: false})} />
+
+      <input
+        ref={importInputRef}
+        type="file"
+        accept=".txt,text/plain"
+        style={{ display: 'none' }}
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) handleImportListFile(file);
+        }}
+      />
       
+      {/* STATISTICS BANNER */}
+      <div style={{
+        display: 'flex',
+        gap: '1rem',
+        padding: '1.25rem',
+        background: 'var(--bg-panel)',
+        borderRadius: '8px',
+        border: '1px solid var(--border)',
+        marginBottom: '30px'
+      }}>
+        <div style={{
+          flex: 1,
+          textAlign: 'center',
+          padding: '0.75rem',
+          background: 'var(--bg-secondary)',
+          borderRadius: '6px',
+          border: '1px solid var(--border)'
+        }}>
+          <div style={{ fontSize: '1.75rem', fontWeight: 'bold', color: 'var(--accent)' }}>
+            {stats.total}
+          </div>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+            Total Entries
+          </div>
+        </div>
+        <div style={{
+          flex: 1,
+          textAlign: 'center',
+          padding: '0.75rem',
+          background: 'var(--bg-secondary)',
+          borderRadius: '6px',
+          border: '1px solid var(--border)'
+        }}>
+          <div style={{ fontSize: '1.75rem', fontWeight: 'bold', color: 'var(--accent)' }}>
+            {stats.folders}
+          </div>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+            Folders
+          </div>
+        </div>
+        {stats.byCategory.map(({ name, count }) => (
+          <div key={name} style={{
+            flex: 1,
+            textAlign: 'center',
+            padding: '0.75rem',
+            background: 'var(--bg-secondary)',
+            borderRadius: '6px',
+            border: '1px solid var(--border)'
+          }}>
+            <div style={{ fontSize: '1.75rem', fontWeight: 'bold', color: 'var(--text-main)' }}>
+              {count}
+            </div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              {name}
+            </div>
+          </div>
+        ))}
+      </div>
+
       {/* HEADER */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '30px', paddingBottom: '15px', borderBottom: '1px solid var(--border)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -100,6 +338,7 @@ const DatabaseExplorer = ({ projectData, setProjectData, searchParams, setSearch
           <span style={{ fontSize: '18px', fontWeight: 'bold', color: 'var(--text-main)' }}> / {currentFolder ? currentFolder.name : 'Home'}</span>
         </div>
         <div style={{ display: 'flex', gap: '10px' }}>
+            <button onClick={openImportPicker} style={actionBtnStyle}>⬆ Upload List</button>
             <button onClick={createFolder} style={actionBtnStyle}>+ New Folder</button>
             <button onClick={createEntity} style={{...actionBtnStyle, background: 'var(--accent)', color: 'white', border: 'none'}}>+ New Entity</button>
         </div>
@@ -141,18 +380,57 @@ const DatabaseExplorer = ({ projectData, setProjectData, searchParams, setSearch
 // ==========================================
 // PART 2: THE CHARACTER SHEET
 // ==========================================
-const CharacterSheet = ({ character, projectData, setProjectData, charIndex }) => {
+const CharacterSheet = ({ character, projectData, setProjectData, saveNowSilently, charIndex }) => {
   const [tempImageSrc, setTempImageSrc] = useState(null);
   const [isEditingImage, setIsEditingImage] = useState(false);
   const [modal, setModal] = useState({ isOpen: false, type: 'confirm', title: '', message: '', onConfirm: () => {} });
+  const [linkModal, setLinkModal] = useState({ isOpen: false, linkText: '', targetId: null });
   const closeModal = () => setModal({ ...modal, isOpen: false });
+  const closeLinkModal = () => setLinkModal({ isOpen: false, linkText: '', targetId: null });
+
+  // Memoize manualLinks to prevent unnecessary re-renders
+  const manualLinks = useMemo(() => character.manualLinks || [], [character.manualLinks]);
+
+  const pendingSaveTimerRef = useRef(null);
+  useEffect(() => {
+    return () => {
+      if (pendingSaveTimerRef.current) {
+        clearTimeout(pendingSaveTimerRef.current);
+      }
+    };
+  }, []);
 
   const updateCharacter = (updates) => {
     const newLore = { ...projectData.lore };
     const updatedChar = { ...character, ...updates };
     newLore.characters[charIndex] = updatedChar;
-    setProjectData({ ...projectData, lore: newLore });
+    const nextProject = { ...projectData, lore: newLore };
+    setProjectData(nextProject);
+
+    if (pendingSaveTimerRef.current) {
+      clearTimeout(pendingSaveTimerRef.current);
+    }
+    pendingSaveTimerRef.current = setTimeout(() => {
+      saveNowSilently?.(nextProject);
+    }, 350);
   };
+
+  // Listen for force save events (when user clicks away from lore card)
+  useEffect(() => {
+    const handleForceSave = () => {
+      // Force a ProjectContext save by triggering a data change
+      const newLore = { ...projectData.lore };
+      setProjectData({ ...projectData, lore: newLore });
+      saveNowSilently?.({ ...projectData, lore: newLore });
+    };
+
+    window.addEventListener('force-save-lore', handleForceSave);
+    window.addEventListener('force-save-all', handleForceSave);
+    return () => {
+      window.removeEventListener('force-save-lore', handleForceSave);
+      window.removeEventListener('force-save-all', handleForceSave);
+    };
+  }, [projectData, setProjectData, saveNowSilently]);
 
   // ALIAS HANDLERS
   const handleAddAlias = (e) => {
@@ -167,6 +445,39 @@ const CharacterSheet = ({ character, projectData, setProjectData, charIndex }) =
   };
   const handleRemoveAlias = (aliasToRemove) => {
     updateCharacter({ aliases: (character.aliases || []).filter(a => a !== aliasToRemove) });
+  };
+
+  // MANUAL LINK HANDLERS
+  const handleCreateLink = () => {
+    const selectedText = window.getSelection().toString().trim();
+    if (!selectedText) {
+      setModal({
+        isOpen: true,
+        type: 'confirm',
+        title: 'No Text Selected',
+        message: 'Please select some text first, then click "Link Lore".',
+        onConfirm: closeModal
+      });
+      return;
+    }
+    setLinkModal({ isOpen: true, linkText: selectedText, targetId: null });
+  };
+
+  const handleSaveLink = () => {
+    if (!linkModal.targetId) return;
+    const manualLinks = character.manualLinks || [];
+    const newLink = {
+      id: Date.now(),
+      text: linkModal.linkText,
+      targetId: linkModal.targetId
+    };
+    updateCharacter({ manualLinks: [...manualLinks, newLink] });
+    closeLinkModal();
+  };
+
+  const handleRemoveLink = (linkId) => {
+    const manualLinks = (character.manualLinks || []).filter(l => l.id !== linkId);
+    updateCharacter({ manualLinks });
   };
 
   // HANDLERS
@@ -206,7 +517,13 @@ const CharacterSheet = ({ character, projectData, setProjectData, charIndex }) =
     
   } catch (err) {
     console.error('Image compression failed:', err);
-    alert('Failed to process image. Please try a smaller file.');
+    setModal({
+      isOpen: true,
+      type: 'confirm',
+      title: 'Upload Error',
+      message: 'Failed to process image. Please try a smaller file.',
+      onConfirm: closeModal
+    });
   }
   
   e.target.value = ''; // Reset input
@@ -231,6 +548,87 @@ const CharacterSheet = ({ character, projectData, setProjectData, charIndex }) =
       <CustomModal isOpen={modal.isOpen} type={modal.type} title={modal.title} message={modal.message} onConfirm={modal.onConfirm} onCancel={closeModal} />
       {isEditingImage && <ImageEditorModal imageSrc={tempImageSrc} onSave={handleSaveImage} onCancel={() => setIsEditingImage(false)} />}
       
+      {/* LINK MODAL */}
+      {linkModal.isOpen && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0,0,0,0.7)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 10000
+        }}>
+          <div style={{
+            background: 'var(--bg-panel)',
+            border: '1px solid var(--border)',
+            borderRadius: '8px',
+            padding: '20px',
+            maxWidth: '500px',
+            width: '90%',
+            maxHeight: '80vh',
+            overflow: 'auto'
+          }}>
+            <h3 style={{ margin: '0 0 15px 0', color: 'var(--text-main)' }}>Link "{linkModal.linkText}" to:</h3>
+            <div style={{ maxHeight: '400px', overflow: 'auto', marginBottom: '15px' }}>
+              {projectData.lore.characters
+                .filter(c => c.id !== character.id)
+                .map(entity => (
+                  <div
+                    key={entity.id}
+                    onClick={() => setLinkModal({ ...linkModal, targetId: entity.id })}
+                    style={{
+                      padding: '10px',
+                      margin: '5px 0',
+                      background: linkModal.targetId === entity.id ? 'var(--accent)' : 'var(--bg-header)',
+                      border: '1px solid var(--border)',
+                      borderRadius: '4px',
+                      cursor: 'pointer',
+                      color: linkModal.targetId === entity.id ? 'white' : 'var(--text-main)'
+                    }}
+                  >
+                    <div style={{ fontWeight: 'bold' }}>{entity.name}</div>
+                    <div style={{ fontSize: '11px', opacity: 0.7 }}>{entity.type || 'Entity'}</div>
+                  </div>
+                ))}
+            </div>
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+              <button
+                onClick={closeLinkModal}
+                style={{
+                  background: 'var(--bg-header)',
+                  border: '1px solid var(--border)',
+                  padding: '8px 16px',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  color: 'var(--text-main)'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveLink}
+                disabled={!linkModal.targetId}
+                style={{
+                  background: linkModal.targetId ? 'var(--accent)' : '#555',
+                  border: 'none',
+                  padding: '8px 16px',
+                  borderRadius: '4px',
+                  cursor: linkModal.targetId ? 'pointer' : 'not-allowed',
+                  color: 'white',
+                  fontWeight: 'bold'
+                }}
+              >
+                Create Link
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
       {/* HEADER */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px', borderBottom: '1px solid var(--border)', paddingBottom: '20px' }}>
         <div style={{ flex: 1 }}>
@@ -244,6 +642,55 @@ const CharacterSheet = ({ character, projectData, setProjectData, charIndex }) =
           
           <input type="text" value={character.name || ""} onChange={(e) => updateCharacter({ name: e.target.value })} style={{ background: 'transparent', border: 'none', fontSize: '32px', fontWeight: 'bold', color: 'var(--text-main)', width: '100%', outline: 'none' }} placeholder="Entity Name" />
           
+          {/* TYPE SELECTOR */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginTop: '8px' }}>
+            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>TYPE:</span>
+            <select 
+              value={character.type || 'Character'} 
+              onChange={(e) => updateCharacter({ type: e.target.value })} 
+              style={{
+                background: 'var(--bg-secondary)',
+                border: '1px solid var(--border)',
+                color: 'var(--text-main)',
+                padding: '4px 8px',
+                borderRadius: '4px',
+                fontSize: '12px',
+                cursor: 'pointer'
+              }}
+            >
+              <option value="Character">Character</option>
+              <option value="Location">Location</option>
+              <option value="Item">Item</option>
+              <option value="Faction">Faction</option>
+              <option value="Event">Event</option>
+              <option value="Concept">Concept</option>
+              <option value="Creature">Creature</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+
+          {/* LINK LORE BUTTON */}
+          <div style={{ marginTop: '10px' }}>
+            <button 
+              onClick={handleCreateLink}
+              style={{
+                background: 'var(--accent)',
+                border: 'none',
+                color: 'white',
+                padding: '6px 12px',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '12px',
+                fontWeight: 'bold'
+              }}
+            >
+              🔗 Link Lore
+            </button>
+            <span style={{ fontSize: '10px', color: 'var(--text-muted)', marginLeft: '8px' }}>
+              Select text, then click to link to another entity
+            </span>
+          </div>
+
           {/* ALIASES */}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '10px', alignItems: 'center' }}>
             <span style={{ fontSize: '12px', color: 'var(--text-muted)', marginRight: '5px' }}>Aliases/Tags:</span>
@@ -256,14 +703,55 @@ const CharacterSheet = ({ character, projectData, setProjectData, charIndex }) =
             <input type="text" placeholder="+ Add Tag (Enter)" onKeyDown={handleAddAlias} style={aliasInputStyle} />
           </div>
 
+          {/* MANUAL LINKS DISPLAY */}
+          {character.manualLinks && character.manualLinks.length > 0 && (
+            <div style={{ marginTop: '10px' }}>
+              <div style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-muted)', marginBottom: '5px' }}>MANUAL LINKS:</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                {character.manualLinks.map(link => {
+                  const target = projectData.lore.characters.find(c => c.id === link.targetId);
+                  return (
+                    <div key={link.id} style={{
+                      background: 'var(--bg-panel)',
+                      border: '1px solid var(--accent)',
+                      borderRadius: '4px',
+                      padding: '4px 8px',
+                      fontSize: '11px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '5px'
+                    }}>
+                      <span>"{link.text}" → {target?.name || 'Unknown'}</span>
+                      <button
+                        onClick={() => handleRemoveLink(link.id)}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: 'var(--accent)',
+                          cursor: 'pointer',
+                          fontSize: '12px',
+                          fontWeight: 'bold',
+                          padding: 0
+                        }}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* --- NEW DEDICATED BIOGRAPHY BOX --- */}
           <div style={{ marginTop: '15px' }}>
             <div style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-muted)', marginBottom: '5px', letterSpacing: '1px' }}>BIOGRAPHY / DESCRIPTION</div>
             <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: '4px', padding: '10px' }}>
-              <AutoResizeTextarea 
+              <LoreLinkedText 
                 value={character.biography || ""} 
                 onChange={(val) => updateCharacter({ biography: val })} 
                 placeholder="Write a brief biography or description..."
+                manualLinks={manualLinks}
               />
             </div>
           </div>
@@ -291,7 +779,7 @@ const CharacterSheet = ({ character, projectData, setProjectData, charIndex }) =
                   <input type="text" value={block.label} onChange={(e) => updateBlock(section.id, block.id, 'label', e.target.value)} style={labelInputStyle} />
                   <button onClick={() => deleteBlock(section.id, block.id)} style={xBtnStyle}>✕</button>
                 </div>
-                <div style={contentBoxStyle}><AutoResizeTextarea value={block.content} onChange={(val) => updateBlock(section.id, block.id, 'content', val)} /></div>
+                <div style={contentBoxStyle}><LoreLinkedText value={block.content} onChange={(val) => updateBlock(section.id, block.id, 'content', val)} manualLinks={manualLinks} /></div>
               </div>
             ))}
             <button onClick={() => addBlock(section.id)} style={addBlockBtnStyle}>+ Add Field</button>
@@ -307,7 +795,7 @@ const CharacterSheet = ({ character, projectData, setProjectData, charIndex }) =
 // MAIN COMPONENT
 // ==========================================
 const LoreCard = () => {
-  const { projectData, setProjectData } = useProject();
+  const { projectData, setProjectData, saveNowSilently } = useProject();
   const [searchParams, setSearchParams] = useSearchParams();
 
   if (!projectData || !projectData.lore) return <div style={{ padding: '40px', color: '#888' }}>Loading...</div>;
@@ -317,9 +805,9 @@ const LoreCard = () => {
   if (urlId) {
     const charIndex = projectData.lore.characters.findIndex(c => c.id.toString() === urlId);
     if (charIndex === -1) return <div style={{padding: 40}}>Entity not found. <button onClick={() => setSearchParams({})}>Go Back</button></div>;
-    return <CharacterSheet character={projectData.lore.characters[charIndex]} projectData={projectData} setProjectData={setProjectData} charIndex={charIndex} />;
+    return <CharacterSheet character={projectData.lore.characters[charIndex]} projectData={projectData} setProjectData={setProjectData} saveNowSilently={saveNowSilently} charIndex={charIndex} />;
   } else {
-    return <DatabaseExplorer projectData={projectData} setProjectData={setProjectData} searchParams={searchParams} setSearchParams={setSearchParams} />;
+    return <DatabaseExplorer projectData={projectData} setProjectData={setProjectData} saveNowSilently={saveNowSilently} searchParams={searchParams} setSearchParams={setSearchParams} />;
   }
 };
 

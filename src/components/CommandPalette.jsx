@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useProject } from '../context/ProjectContext';
 
 const CommandPalette = ({ toggleTheme, toggleZenMode }) => {
-  const { projectData } = useProject();
+  const { projectData, setProjectData } = useProject();
   const navigate = useNavigate();
   
   const [isOpen, setIsOpen] = useState(false);
@@ -62,68 +62,127 @@ const CommandPalette = ({ toggleTheme, toggleZenMode }) => {
     }
 
     const q = query.toLowerCase();
-    const allResults = [];
+    const searchProjects = async () => {
+      const allResults = [];
 
-    // A. SEARCH CHAPTERS
-    const chapters = projectData.manuscript?.chapters || [];
-    chapters.forEach(c => {
-      if (c.title.toLowerCase().includes(q)) {
-        allResults.push({
-          id: c.id, type: 'Chapter', label: c.title, icon: '📄',
-          action: () => navigate(`/editor?id=${c.id}`)
-        });
+      // A. SEARCH CHAPTERS
+      const chapters = projectData.manuscript?.chapters || [];
+      chapters.forEach(c => {
+        if (c.title.toLowerCase().includes(q)) {
+          allResults.push({
+            id: c.id, type: 'Chapter', label: c.title, icon: '📄',
+            action: () => {
+              window.dispatchEvent(new CustomEvent('force-save-all'));
+              navigate(`/editor?id=${c.id}`);
+            }
+          });
+        }
+      });
+
+      // B. SEARCH LORE (Name + Aliases)
+      const chars = projectData.lore?.characters || [];
+      chars.forEach(c => {
+        const nameMatch = c.name.toLowerCase().includes(q);
+        const aliasMatch = c.aliases?.some(a => a.toLowerCase().includes(q));
+        
+        if (nameMatch || aliasMatch) {
+          allResults.push({
+            id: c.id, type: 'Lore', label: c.name, icon: '👤',
+            sub: aliasMatch ? `Matches alias "${q}"` : null,
+            action: () => {
+              window.dispatchEvent(new CustomEvent('force-save-all'));
+              navigate(`/lore?id=${c.id}`);
+            }
+          });
+        }
+      });
+
+      // C. SEARCH MAPS
+      // Handle both old object format and new array format for Maps
+      const mapsRaw = projectData.worldMap;
+      const maps = Array.isArray(mapsRaw) ? mapsRaw : (mapsRaw ? [mapsRaw] : []);
+      maps.forEach(m => {
+        const mapName = m.name || 'Global Map';
+        if (mapName.toLowerCase().includes(q)) {
+          allResults.push({
+            id: m.id || 'default', type: 'Map', label: mapName, icon: '🗺️',
+            action: () => {
+              window.dispatchEvent(new CustomEvent('force-save-all'));
+              navigate('/map');
+            }
+          });
+        }
+      });
+
+      // D. LOAD RECENT PROJECTS FROM ELECTRON (if in Electron)
+      if (window.electronAPI && q.includes('switch')) {
+        try {
+          const result = await window.electronAPI.listProjects();
+          if (result.success && result.projects) {
+            result.projects.slice(0, 5).forEach(proj => {
+              allResults.push({
+                id: proj.id,
+                type: 'Project',
+                label: proj.title,
+                icon: '📁',
+                sub: `Last modified: ${new Date(proj.lastModified).toLocaleDateString()}`,
+                action: () => loadProject(proj.id)
+              });
+            });
+          }
+        } catch (err) {
+          console.error('Failed to load projects:', err);
+        }
       }
-    });
 
-    // B. SEARCH LORE (Name + Aliases)
-    const chars = projectData.lore?.characters || [];
-    chars.forEach(c => {
-      const nameMatch = c.name.toLowerCase().includes(q);
-      const aliasMatch = c.aliases?.some(a => a.toLowerCase().includes(q));
-      
-      if (nameMatch || aliasMatch) {
-        allResults.push({
-          id: c.id, type: 'Lore', label: c.name, icon: '👤',
-          sub: aliasMatch ? `Matches alias "${q}"` : null,
-          action: () => navigate(`/lore?id=${c.id}`)
-        });
-      }
-    });
+      // E. SYSTEM COMMANDS (Filter)
+      getDefaultCommands().forEach(cmd => {
+        if (cmd.label.toLowerCase().includes(q)) {
+          allResults.push(cmd);
+        }
+      });
 
-    // C. SEARCH MAPS
-    // Handle both old object format and new array format for Maps
-    const mapsRaw = projectData.worldMap;
-    const maps = Array.isArray(mapsRaw) ? mapsRaw : (mapsRaw ? [mapsRaw] : []);
-    maps.forEach(m => {
-      const mapName = m.name || 'Global Map';
-      if (mapName.toLowerCase().includes(q)) {
-        allResults.push({
-          id: m.id || 'default', type: 'Map', label: mapName, icon: '🗺️',
-          action: () => navigate('/map') // Currently just goes to map page
-        });
-      }
-    });
+      setResults(allResults.slice(0, 10)); // Limit to top 10
+      setSelectedIndex(0);
+    };
 
-    // D. SYSTEM COMMANDS (Filter)
-    getDefaultCommands().forEach(cmd => {
-      if (cmd.label.toLowerCase().includes(q)) {
-        allResults.push(cmd);
-      }
-    });
-
-    setResults(allResults.slice(0, 10)); // Limit to top 10
-    setSelectedIndex(0);
+    searchProjects();
 
   }, [query, isOpen, projectData]);
 
   // --- HELPERS ---
-  const getDefaultCommands = () => [
-    { type: 'Action', label: 'Toggle Dark/Light Mode', icon: '🌗', action: toggleTheme },
-    { type: 'Action', label: 'Toggle Zen Mode', icon: '🧘', action: toggleZenMode },
-    { type: 'Nav', label: 'Go to Timeline', icon: '⏳', action: () => navigate('/timeline') },
-    { type: 'Nav', label: 'Go to The Web', icon: '🕸️', action: () => navigate('/web') },
-    { type: 'Nav', label: 'Go to Scratchpad', icon: '📓', action: () => navigate('/scratchpad') },
-  ];
+  const loadProject = async (projectId) => {
+    if (window.electronAPI) {
+      const result = await window.electronAPI.loadProjectFile(projectId);
+      if (result.success) {
+        setProjectData(result.data);
+        navigate('/lore');
+        setIsOpen(false);
+      }
+    }
+  };
+
+  const getDefaultCommands = () => {
+    const commands = [
+      { type: 'Action', label: 'Toggle Dark/Light Mode', icon: '🌗', action: toggleTheme },
+      { type: 'Action', label: 'Toggle Zen Mode', icon: '🧘', action: toggleZenMode },
+      { type: 'Nav', label: 'Go to Timeline', icon: '⏳', action: () => { window.dispatchEvent(new CustomEvent('force-save-all')); navigate('/timeline'); } },
+      { type: 'Nav', label: 'Go to The Web', icon: '🕸️', action: () => { window.dispatchEvent(new CustomEvent('force-save-all')); navigate('/web'); } },
+      { type: 'Nav', label: 'Go to Scratchpad', icon: '📓', action: () => { window.dispatchEvent(new CustomEvent('force-save-all')); navigate('/scratchpad'); } },
+    ];
+    
+    if (window.electronAPI) {
+      commands.unshift({ 
+        type: 'Action', 
+        label: 'Switch Project', 
+        icon: '🔄', 
+        action: () => setQuery('switch '),
+        sub: 'Type "switch" to see recent projects'
+      });
+    }
+    
+    return commands;
+  };
 
   const executeResult = (item) => {
     if (item && item.action) {

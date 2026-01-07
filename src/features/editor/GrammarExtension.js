@@ -18,8 +18,16 @@ function debounce(func, wait) {
   };
 }
 
-// Check grammar using LanguageTool API
+// Grammar check disabled due to CORS restrictions
+// To enable, you need to either:
+// 1. Set up a backend proxy for LanguageTool API
+// 2. Use LanguageTool's premium API with CORS support
+// 3. Run your own LanguageTool server
 async function checkGrammar(text) {
+  // Grammar checking temporarily disabled
+  return [];
+  
+  /* Original implementation - disabled due to CORS
   if (!text || text.trim().length < 3) return [];
   
   try {
@@ -38,9 +46,10 @@ async function checkGrammar(text) {
     const data = await response.json();
     return data.matches || [];
   } catch (error) {
-    console.error('Grammar check failed:', error);
+    // Silently fail - CORS restrictions prevent direct API access
     return [];
   }
+  */
 }
 
 export const GrammarExtension = Extension.create({

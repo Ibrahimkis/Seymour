@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from "react";
 import { useProject } from "../../context/ProjectContext";
+import ManuscriptStats from "../../components/ManuscriptStats";
 
 const ChapterInspector = ({ chapterId }) => {
   const { projectData, setProjectData } = useProject();
@@ -148,6 +149,12 @@ const ChapterInspector = ({ chapterId }) => {
         >
           📊 Analytics
         </button>
+        <button
+          onClick={() => setActiveTab("manuscript")}
+          style={activeTab === "manuscript" ? activeTabStyle : tabStyle}
+        >
+          📚 Manuscript
+        </button>
       </div>
 
       {/* CONTENT AREA */}
@@ -279,6 +286,13 @@ const ChapterInspector = ({ chapterId }) => {
               )}
             </div>
           </>
+        )}
+
+        {/* --- TAB: MANUSCRIPT STATS --- */}
+        {activeTab === "manuscript" && (
+          <div>
+            <ManuscriptStats />
+          </div>
         )}
       </div>
     </div>

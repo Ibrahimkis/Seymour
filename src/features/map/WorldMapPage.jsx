@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import MapCanvas from '../../components/MapCanvas'; 
 import CustomModal from '../../components/CustomModal';
@@ -27,6 +27,23 @@ const WorldMapPage = () => {
   // Modal State
   const [modal, setModal] = useState({ isOpen: false, type: 'input', title: '', message: '', onConfirm: () => {} });
   const closeModal = () => setModal({ ...modal, isOpen: false });
+
+  // Listen for force save events
+  useEffect(() => {
+    const handleForceSave = () => {
+      // Force a data change to trigger save - use callback to avoid dependency
+      setProjectData(prev => {
+        const rawData = prev.worldMap || { imageSrc: null, pins: [] };
+        const currentMaps = Array.isArray(rawData) 
+          ? rawData 
+          : [ { id: 'default', name: 'Global Map', imageSrc: rawData.imageSrc, pins: rawData.pins || [] } ];
+        return { ...prev, worldMap: [...currentMaps] };
+      });
+    };
+
+    window.addEventListener('force-save-all', handleForceSave);
+    return () => window.removeEventListener('force-save-all', handleForceSave);
+  }, [setProjectData]);
 
   // --- HELPER: UPDATE ACTIVE MAP ---
   const updateCurrentMap = (updates) => {
@@ -72,7 +89,16 @@ const WorldMapPage = () => {
 
   const deleteTab = (mapId, e) => {
     e.stopPropagation();
-    if (maps.length === 1) return alert("Cannot delete the last map.");
+    if (maps.length === 1) {
+      setModal({
+        isOpen: true,
+        type: 'confirm',
+        title: 'Cannot Delete',
+        message: 'Cannot delete the last map.',
+        onConfirm: closeModal
+      });
+      return;
+    }
     setModal({
       isOpen: true, type: 'confirm', title: 'Delete Map', message: 'Are you sure? All pins on this map will be lost.',
       onConfirm: () => {
@@ -99,7 +125,13 @@ const WorldMapPage = () => {
     
   } catch (err) {
     console.error('Map compression failed:', err);
-    alert('Failed to upload map. Please try a smaller file.');
+    setModal({
+      isOpen: true,
+      type: 'confirm',
+      title: 'Upload Error',
+      message: 'Failed to upload map. Please try a smaller file.',
+      onConfirm: closeModal
+    });
   }
 };
 
@@ -121,7 +153,10 @@ const WorldMapPage = () => {
   };
 
   const handlePinClick = (targetId) => {
-    if (targetId) navigate(`/lore?id=${targetId}`);
+    if (targetId) {
+      window.dispatchEvent(new CustomEvent('force-save-all'));
+      navigate(`/lore?id=${targetId}`);
+    }
   };
 
   return (

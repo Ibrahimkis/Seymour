@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useProject } from '../context/ProjectContext';
 import CustomModal from './CustomModal'; 
@@ -16,8 +16,28 @@ const LeftPanel = () => {
   
   // NEW: Search State
   const [searchTerm, setSearchTerm] = useState('');
+  const searchInputRef = useRef(null);
 
   const closeModal = () => setModal({ ...modal, isOpen: false });
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      // Ctrl+Shift+N - New Chapter
+      if (e.ctrlKey && e.shiftKey && e.key === 'N') {
+        e.preventDefault();
+        handleAddChapter();
+      }
+      // Ctrl+F - Focus Search
+      if (e.ctrlKey && e.key === 'f') {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [projectData]);
 
   // Check for unsaved changes before navigation
   const checkUnsavedChanges = (path) => {
@@ -65,6 +85,15 @@ const LeftPanel = () => {
   };
 
   const handleNav = (path) => {
+    // Force save before navigation if on editor and autosave is enabled
+    const autoSaveEnabled = localStorage.getItem('autoSaveEnabled');
+    const isAutoSaveOn = autoSaveEnabled !== null ? JSON.parse(autoSaveEnabled) : true;
+    
+    if (location.pathname === '/editor' && isAutoSaveOn) {
+      // Trigger a save event that the editor can pick up
+      window.dispatchEvent(new CustomEvent('force-save-chapter'));
+    }
+    
     if (checkUnsavedChanges(path)) {
       navigate(path);
     }
@@ -164,10 +193,10 @@ const LeftPanel = () => {
         <button onClick={() => handleNav('/scratchpad')} style={location.pathname === '/scratchpad' ? activeLinkStyle : linkStyle}>
           📓 Global Scratchpad
         </button>
-        <button onClick={() => navigate('/timeline')} style={location.pathname === '/timeline' ? activeLinkStyle : linkStyle}>
+        <button onClick={() => handleNav('/timeline')} style={location.pathname === '/timeline' ? activeLinkStyle : linkStyle}>
           ⏳ The Chronicle
         </button>
-        <button onClick={() => navigate('/web')} style={location.pathname === '/web' ? activeLinkStyle : linkStyle}>
+        <button onClick={() => handleNav('/web')} style={location.pathname === '/web' ? activeLinkStyle : linkStyle}>
           🕸️ The Web
         </button>
       </nav>
@@ -177,6 +206,7 @@ const LeftPanel = () => {
       {/* SEARCH BAR */}
       <div style={{ padding: '0 10px 10px 10px', borderBottom: '1px solid var(--border)' }}>
         <input 
+          ref={searchInputRef}
           type="text" 
           placeholder="🔍 Filter chapters..." 
           value={searchTerm}
@@ -223,7 +253,7 @@ const LeftPanel = () => {
             </div>
         )}
 
-        <button onClick={handleAddChapter} style={addBtnStyle}>
+        <button onClick={handleAddChapter} style={addBtnStyle} title="Add Chapter (Ctrl+Shift+N)">
           + Add Chapter
         </button>
       </div>
@@ -265,7 +295,10 @@ const headerStyle = {
 
 const linkStyle = { 
   background: 'transparent', 
-  border: 'none', 
+  borderTop: 'none',
+  borderRight: 'none',
+  borderBottom: 'none',
+  borderLeft: 'none',
   color: 'var(--text-muted)', 
   textAlign: 'left', 
   padding: '6px 15px', 
@@ -293,7 +326,9 @@ const searchInputStyle = {
   padding: '6px',
   borderRadius: '4px',
   fontSize: '12px',
-  outline: 'none'
+  outline: 'none',
+  textAlign: 'center',
+  boxSizing: 'border-box'
 };
 
 const addBtnStyle = { 

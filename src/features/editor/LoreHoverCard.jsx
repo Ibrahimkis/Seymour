@@ -23,6 +23,7 @@ const LoreHoverCard = ({ character, position }) => {
       return;
     }
     
+    window.dispatchEvent(new CustomEvent('force-save-all'));
     navigate(`/lore?id=${character.id}`);
   };
 
@@ -38,7 +39,9 @@ const LoreHoverCard = ({ character, position }) => {
         border: '1px solid var(--accent)',
         borderRadius: '8px',
         padding: '12px',
-        width: '280px',
+        width: '420px',
+        maxHeight: '320px',
+        overflow: 'hidden',
         boxShadow: '0 8px 30px rgba(0,0,0,0.6)',
         display: 'flex',
         gap: '12px',
@@ -66,9 +69,11 @@ const LoreHoverCard = ({ character, position }) => {
         {aliasString && (
           <div style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '6px', fontStyle: 'italic' }}>aka {aliasString}</div>
         )}
-        <p style={{ margin: 0, fontSize: '11px', color: 'var(--text-muted)', lineHeight: '1.4', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-          {getSummary(character)}
-        </p>
+        <div style={{ overflowY: 'auto', maxHeight: '240px', paddingRight: '6px' }}>
+          <p style={{ margin: 0, fontSize: '11px', color: 'var(--text-muted)', lineHeight: '1.4' }}>
+            {getSummary(character)}
+          </p>
+        </div>
       </div>
       <style>{`@keyframes fadeIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }`}</style>
     </div>

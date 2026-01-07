@@ -1,12 +1,9 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react'; 
 import StarterKit from '@tiptap/starter-kit';
-import Underline from '@tiptap/extension-underline';
 import Image from '@tiptap/extension-image';
 import TextAlign from '@tiptap/extension-text-align';
-import Link from '@tiptap/extension-link';
 import Placeholder from '@tiptap/extension-placeholder';
-import BubbleMenuExtension from '@tiptap/extension-bubble-menu'; 
 import CharacterCount from '@tiptap/extension-character-count';
 import Focus from '@tiptap/extension-focus'; 
 import { useSearchParams, useNavigate } from 'react-router-dom';
@@ -16,33 +13,55 @@ import EditorFooter from './EditorFooter';
 import LoreHoverCard from './LoreHoverCard'; 
 import TypographyControls from './TypographyControls'; 
 import ChapterInspector from './ChapterInspector';
-import EditorContextMenu from './EditorContextMenu'; // <--- NEW IMPORT
+import EditorContextMenu, { CreateLoreModal, AddToExistingModal } from './EditorContextMenu'; // <--- NEW IMPORT
 import CustomModal from '../../components/CustomModal';
 import { useProject } from '../../context/ProjectContext';
 import { LoreMark } from './LoreExtension';
-import { GrammarExtension } from './GrammarExtension';
 
 const EditorLayout = () => {
-  const { projectData, setProjectData } = useProject();
+  const { projectData, setProjectData, saveNowSilently, saveStatus, setSaveStatus } = useProject();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
 
+  // Prefer native Electron context menu (spellcheck, OS-like UX). Custom menu is used as a fallback.
+  const useNativeContextMenu = !!window.electronAPI;
+
+  // Use ref to access latest projectData without causing re-renders
+  const projectDataRef = useRef(projectData);
+  useEffect(() => {
+    projectDataRef.current = projectData;
+  }, [projectData]);
+
   const settings = projectData.settings || { fontSize: 18, zoom: 100, fontFamily: 'serif', customFonts: [] };
+  
+  // Keep settings in ref to avoid circular dependency
+  const settingsRef = useRef(settings);
+  useEffect(() => {
+    settingsRef.current = settings;
+  }, [settings]);
 
   const urlId = searchParams.get('id');
   const chapters = projectData.manuscript.chapters || [];
+  
+  // Also keep chapters in a ref for effects
+  const chaptersRef = useRef(chapters);
+  useEffect(() => {
+    chaptersRef.current = chapters;
+  }, [chapters]);
+  
   let chapterIndex = 0;
   if (urlId) {
     const found = chapters.findIndex(c => c.id.toString() === urlId);
     if (found !== -1) chapterIndex = found;
   }
-  const chapter = chapters[chapterIndex];
+  
+  // Memoize chapter to prevent new references when content hasn't changed
+  const chapter = useMemo(() => chapters[chapterIndex], [chapters, chapterIndex]);
 
   const [autoSaveEnabled, setAutoSaveEnabled] = useState(() => {
     const saved = localStorage.getItem('autoSaveEnabled');
     return saved !== null ? JSON.parse(saved) : true; // Always true by default
   });
-  const [status, setStatus] = useState('Saved');
   const [hoveredChar, setHoveredChar] = useState(null);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const [isTypewriterMode, setIsTypewriterMode] = useState(false);
@@ -54,8 +73,56 @@ const EditorLayout = () => {
   // --- NEW: Context Menu State ---
   const [contextMenu, setContextMenu] = useState(null);
 
+  // Native menu Lore actions
+  const [nativeLoreAction, setNativeLoreAction] = useState(null);
+
+  const detectLoreType = (text) => {
+    if (!text) return 'Character';
+    const lower = String(text).toLowerCase();
+    const locationWords = ['forest', 'city', 'kingdom', 'castle', 'mountain', 'river', 'sea', 'island', 'valley', 'cave', 'temple', 'tower', 'village', 'town', 'plains', 'desert'];
+    if (locationWords.some((word) => lower.includes(word))) return 'Location';
+    if (String(text).startsWith('The ')) return 'Location';
+    const raceWords = ['elf', 'dwarf', 'orc', 'goblin', 'dragon', 'human', 'race', 'tribe', 'clan', 'folk'];
+    if (raceWords.some((word) => lower.includes(word))) return 'Race';
+    return 'Character';
+  };
+
+  // Native context menu -> open Lore modals
+  useEffect(() => {
+    if (!window.electronAPI?.onNativeContextLore) return;
+
+    const handler = (payload) => {
+      const action = payload?.action;
+      const text = String(payload?.text || '').trim();
+      if (!text) return;
+      if (action !== 'create' && action !== 'addTo') return;
+
+      setNativeLoreAction({ mode: action, text });
+    };
+
+    window.electronAPI.onNativeContextLore(handler);
+    return () => {
+      window.electronAPI?.removeAllListeners?.('native-context-lore');
+    };
+  }, []);
+
+  // Track latest context menu position to avoid stale closure issues in async handlers
+  const contextMenuRef = useRef(contextMenu);
+  useEffect(() => {
+    contextMenuRef.current = contextMenu;
+  }, [contextMenu]);
+
+  // Track the word + document range we right-clicked so we can apply spell fixes.
+  const pendingSpellcheckRef = useRef(null);
+
   const [localTitle, setLocalTitle] = useState(chapter?.title || '');
   const titleSaveTimer = useRef(null);
+  
+  // Keep localTitle in ref to avoid circular dependency
+  const localTitleRef = useRef(localTitle);
+  useEffect(() => {
+    localTitleRef.current = localTitle;
+  }, [localTitle]);
 
   useEffect(() => {
     if (chapter) {
@@ -65,22 +132,25 @@ const EditorLayout = () => {
 
   // --- CUSTOM FONT LOADER ---
   useEffect(() => {
-    if (settings.customFonts) {
-      settings.customFonts.forEach(font => {
+    const currentSettings = settingsRef.current;
+    if (currentSettings.customFonts) {
+      currentSettings.customFonts.forEach(font => {
         const fontFace = new FontFace(font.name, `url(${font.data})`);
         fontFace.load().then(loaded => document.fonts.add(loaded)).catch(e => console.error(e));
       });
     }
-  }, [settings.customFonts]);
+  }, []); // Empty dependency - only load fonts once on mount
 
   // --- EDITOR ENGINE ---
   const editor = useEditor({
     extensions: [
-      StarterKit,
+      StarterKit.configure({
+        link: {
+          openOnClick: false,
+        },
+      }),
       LoreMark,
-      Underline,
       Image,
-      Link.configure({ openOnClick: false }), 
       TextAlign.configure({ types: ['heading', 'paragraph'] }),
       Placeholder.configure({ placeholder: 'Start writing your masterpiece...' }),
       CharacterCount,
@@ -88,12 +158,8 @@ const EditorLayout = () => {
         className: 'has-focus',
         mode: 'all',
       }),
-      BubbleMenuExtension.configure({
-        element: null,
-      }),
-      GrammarExtension,
     ],
-    content: chapter?.content || '',
+    content: '', // Initialize empty - content loaded by useEffect
     editorProps: { 
       attributes: { 
         class: 'seymour-editor',
@@ -102,10 +168,11 @@ const EditorLayout = () => {
     },
     onCreate: ({ editor }) => {
       // Set the current chapter ID when editor is created
-      editor.storage.currentChapterId = chapter?.id;
+      // Chapter will be loaded by useEffect
+      editor.storage.currentChapterId = null;
     },
     onUpdate: () => {
-      setStatus('Unsaved changes...');
+      setSaveStatus('Unsaved changes...');
       sessionStorage.setItem('hasUnsavedChanges', 'true');
     },
     onTransaction: ({ transaction, editor }) => {
@@ -136,6 +203,38 @@ const EditorLayout = () => {
     },
   });
 
+  // Listen for force save events (when user clicks away)
+  useEffect(() => {
+    if (!editor) return; // Don't register listeners until editor exists
+    
+    const handleForceSave = () => {
+      if (autoSaveEnabled && saveStatus === 'Unsaved changes...') {
+        const currentChapters = chaptersRef.current;
+        const currentChapterIndex = currentChapters.findIndex(c => c.id === editor.storage?.currentChapterId);
+        if (currentChapterIndex !== -1) {
+          const content = editor.getHTML();
+          const currentChapter = currentChapters[currentChapterIndex];
+          const newManuscript = { ...projectDataRef.current.manuscript };
+          newManuscript.chapters[currentChapterIndex] = { 
+            ...currentChapter, 
+            content, 
+            title: localTitleRef.current 
+          };
+          setProjectData({ ...projectDataRef.current, manuscript: newManuscript });
+          setSaveStatus('Saved');
+          sessionStorage.removeItem('hasUnsavedChanges');
+        }
+      }
+    };
+
+    window.addEventListener('force-save-chapter', handleForceSave);
+    window.addEventListener('force-save-all', handleForceSave);
+    return () => {
+      window.removeEventListener('force-save-chapter', handleForceSave);
+      window.removeEventListener('force-save-all', handleForceSave);
+    };
+  }, [editor, autoSaveEnabled, saveStatus, setProjectData, setSaveStatus]);
+
   useEffect(() => {
     // Load chapter content when switching
     if (editor && chapter) {
@@ -155,36 +254,40 @@ const EditorLayout = () => {
         editor.commands.setContent(chapter.content || '');
         editor.storage.currentChapterId = chapter.id;
         setLocalTitle(chapter.title);
-        setStatus('Saved');
+        setSaveStatus('Saved');
         sessionStorage.removeItem('hasUnsavedChanges');
       }
     }
   }, [chapter?.id, editor, autoSaveEnabled]);
 
-  // Separate effect for warning/saving on chapter switch
+  // Separate effect for saving on chapter switch
   useEffect(() => {
-    let savedBeforeSwitch = false;
-    
     return () => {
-      if (savedBeforeSwitch) return;
-      
-      // Save if autosave is on
-      if (editor && autoSaveEnabled && status === 'Unsaved changes...') {
+      // Save if autosave is on and there are unsaved changes
+      if (editor && autoSaveEnabled && saveStatus === 'Unsaved changes...') {
+        const currentChapters = chaptersRef.current;
+        const currentChapterIndex = currentChapters.findIndex(c => c.id === editor.storage?.currentChapterId);
+        if (currentChapterIndex === -1) return;
+        
         const content = editor.getHTML();
-        const newManuscript = { ...projectData.manuscript };
-        newManuscript.chapters[chapterIndex] = { ...chapter, content, title: localTitle };
-        setProjectData({ ...projectData, manuscript: newManuscript });
+        const currentChapter = currentChapters[currentChapterIndex];
+        const newManuscript = { ...projectDataRef.current.manuscript };
+        newManuscript.chapters[currentChapterIndex] = { 
+          ...currentChapter, 
+          content, 
+          title: localTitleRef.current 
+        };
+        setProjectData({ ...projectDataRef.current, manuscript: newManuscript });
         sessionStorage.removeItem('hasUnsavedChanges');
-        savedBeforeSwitch = true;
       }
     };
-  }, [chapter?.id]);
+  }, [chapter?.id, editor, autoSaveEnabled, saveStatus, setProjectData]);
 
   // Handle warning modal actions
   const handleSaveAndSwitch = () => {
     if (editor) {
       saveChapter(editor.getHTML(), localTitle);
-      setStatus('Saved');
+      setSaveStatus('Saved');
       sessionStorage.removeItem('hasUnsavedChanges');
       setShowUnsavedWarning(false);
       
@@ -192,10 +295,11 @@ const EditorLayout = () => {
       if (window.pendingLoreNavigation) {
         const loreId = window.pendingLoreNavigation;
         window.pendingLoreNavigation = null;
+        window.dispatchEvent(new CustomEvent('force-save-all'));
         navigate(`/lore?id=${loreId}`);
       } else if (pendingChapterId) {
         // Force chapter reload
-        const newChapter = projectData.manuscript.chapters.find(ch => ch.id === pendingChapterId);
+        const newChapter = projectDataRef.current.manuscript.chapters.find(ch => ch.id === pendingChapterId);
         if (newChapter && editor) {
           editor.commands.setContent(newChapter.content);
           editor.storage.currentChapterId = newChapter.id;
@@ -209,16 +313,17 @@ const EditorLayout = () => {
   const handleDiscardAndSwitch = () => {
     sessionStorage.removeItem('hasUnsavedChanges');
     setShowUnsavedWarning(false);
-    setStatus('Saved');
+    setSaveStatus('Saved');
     
     // Check if navigating to lore or switching chapters
     if (window.pendingLoreNavigation) {
       const loreId = window.pendingLoreNavigation;
       window.pendingLoreNavigation = null;
+      window.dispatchEvent(new CustomEvent('force-save-all'));
       navigate(`/lore?id=${loreId}`);
     } else if (pendingChapterId && editor) {
       // Force chapter reload
-      const newChapter = projectData.manuscript.chapters.find(ch => ch.id === pendingChapterId);
+      const newChapter = projectDataRef.current.manuscript.chapters.find(ch => ch.id === pendingChapterId);
       if (newChapter && editor) {
         editor.commands.setContent(newChapter.content);
         editor.storage.currentChapterId = newChapter.id;
@@ -234,28 +339,56 @@ const EditorLayout = () => {
     window.pendingLoreNavigation = null;
   };
 
+  // Autosave effect - only trigger on saveStatus changes, not chapter changes
   useEffect(() => {
     if (!editor || !autoSaveEnabled) return;
+    if (saveStatus !== 'Unsaved changes...') return;
+    
     const saveTimer = setTimeout(() => {
-      if (status === 'Unsaved changes...') {
-        saveChapter(editor.getHTML(), chapter.title);
-        setStatus('Saved');
-        sessionStorage.setItem('hasUnsavedChanges', 'false');
-      }
-    }, 2000); // Save every 2 seconds
+      // Get the current chapter index at save time
+      const currentChapters = chaptersRef.current;
+      const currentChapterIndex = currentChapters.findIndex(c => c.id === editor.storage?.currentChapterId);
+      if (currentChapterIndex === -1) return;
+      
+      const currentChapter = currentChapters[currentChapterIndex];
+      const content = editor.getHTML();
+      
+      // Save with current data, not stale closure data
+      const newManuscript = { ...projectDataRef.current.manuscript };
+      newManuscript.chapters[currentChapterIndex] = { 
+        ...currentChapter, 
+        content, 
+        title: localTitleRef.current 
+      };
+      setProjectData({ ...projectDataRef.current, manuscript: newManuscript });
+      setSaveStatus('Saved');
+      sessionStorage.setItem('hasUnsavedChanges', 'false');
+    }, 2000); // Save 2 seconds after last change
+    
     return () => clearTimeout(saveTimer);
-  }, [status, autoSaveEnabled, editor, chapter?.id]);
+  }, [saveStatus, autoSaveEnabled, editor, setProjectData, setSaveStatus]);
 
   const saveChapter = useCallback((newContent, newTitle) => {
-    const newManuscript = { ...projectData.manuscript };
-    newManuscript.chapters[chapterIndex] = { ...chapter, content: newContent, title: newTitle };
-    setProjectData({ ...projectData, manuscript: newManuscript });
-  }, [projectData, chapterIndex, chapter]);
+    // Always get fresh chapter index to avoid stale closures
+    const currentChapters = chaptersRef.current;
+    const currentChapterIndex = currentChapters.findIndex(c => c.id === editor?.storage?.currentChapterId);
+    if (currentChapterIndex === -1) return;
+    
+    const currentChapter = currentChapters[currentChapterIndex];
+    const newManuscript = { ...projectDataRef.current.manuscript };
+    newManuscript.chapters[currentChapterIndex] = { 
+      ...currentChapter, 
+      content: newContent, 
+      title: newTitle 
+    };
+    setProjectData({ ...projectDataRef.current, manuscript: newManuscript });
+  }, [editor, setProjectData]);
 
   const handleTitleChange = (e) => {
     const newTitle = e.target.value;
     setLocalTitle(newTitle);
-    setStatus('Unsaved changes...');
+    setSaveStatus('Unsaved changes...');
+    sessionStorage.setItem('hasUnsavedChanges', 'true');
     
     if (titleSaveTimer.current) {
       clearTimeout(titleSaveTimer.current);
@@ -263,8 +396,20 @@ const EditorLayout = () => {
     
     if (autoSaveEnabled) {
       titleSaveTimer.current = setTimeout(() => {
-        saveChapter(editor?.getHTML(), newTitle);
-        setStatus('Saved');
+        // Use fresh chapter data at save time
+        const currentChapterIndex = chapters.findIndex(c => c.id === editor?.storage?.currentChapterId);
+        if (currentChapterIndex !== -1) {
+          const currentChapter = chapters[currentChapterIndex];
+          const newManuscript = { ...projectData.manuscript };
+          newManuscript.chapters[currentChapterIndex] = { 
+            ...currentChapter, 
+            content: editor?.getHTML() || currentChapter.content, 
+            title: newTitle 
+          };
+          setProjectData({ ...projectData, manuscript: newManuscript });
+          setSaveStatus('Saved');
+          sessionStorage.setItem('hasUnsavedChanges', 'false');
+        }
       }, 2000); // Save 2 seconds after title change
     }
   };
@@ -272,7 +417,7 @@ const EditorLayout = () => {
   const handleManualSave = () => {
     if (editor) {
       saveChapter(editor.getHTML(), localTitle);
-      setStatus('Saved');
+      setSaveStatus('Saved');
     }
   };
 
@@ -302,8 +447,8 @@ const EditorLayout = () => {
     });
 
     chain.run();
-    setStatus('Links Updated!');
-    setTimeout(() => setStatus('Saved'), 2000);
+    setSaveStatus('Links Updated!');
+    setTimeout(() => setSaveStatus('Saved'), 2000);
   };
 
   const handlePageMouseMove = (e) => {
@@ -347,25 +492,142 @@ const EditorLayout = () => {
   };
 
   // --- NEW: Right-Click Handler ---
-  const handleContextMenu = (e) => {
-    const isElectron = window.electronAPI !== undefined;
-    
-    // In Electron, always show custom menu
-    // In browser, only show custom menu if text is selected (otherwise let native spell check show)
-    if (!isElectron && (!editor || editor.state.selection.empty)) {
-      // Let browser's native context menu show for spell check
+  const handleContextMenu = async (e) => {
+    // If we're using the native Electron menu, do not intercept right-click.
+    if (useNativeContextMenu) {
+      try {
+        const clickedWord = getWordAtPosition(e);
+        if (clickedWord?.text) {
+          window.electronAPI?.reportContextWord?.({ word: clickedWord.text });
+        }
+      } catch {}
       return;
     }
-    
+
     e.preventDefault();
-
-    setContextMenu({
-      x: e.clientX,
-      y: e.clientY
-    });
-
-    // Clear previous spell check data
+    
+    // Clear previous spell check data immediately
     window.spellCheckWord = null;
+    pendingSpellcheckRef.current = null;
+    
+    // Show menu immediately (spell check will populate async)
+    const menuPosition = { x: e.clientX, y: e.clientY };
+    setContextMenu(menuPosition);
+    contextMenuRef.current = menuPosition;
+    
+    // Get the clicked word and check if it's misspelled
+    const clickedWord = getWordAtPosition(e);
+
+    if (clickedWord) {
+      pendingSpellcheckRef.current = {
+        ...clickedWord,
+        x: menuPosition.x,
+        y: menuPosition.y,
+        ts: Date.now(),
+      };
+    }
+  };
+
+  // Listen for spellcheck context payloads from the Electron main process.
+  // This avoids racing renderer->main IPC calls against the internal spellcheck pipeline.
+  useEffect(() => {
+    if (!window.electronAPI?.onSpellCheckContext) return;
+
+    const handler = (payload) => {
+      const openMenu = contextMenuRef.current;
+      const pending = pendingSpellcheckRef.current;
+      if (!openMenu || !pending) return;
+
+      // In packaged builds (and when the editor is CSS-transformed/zoomed), Electron's
+      // context-menu coords may not match renderer `clientX/clientY`. Treat the next
+      // incoming payload shortly after the right-click as authoritative.
+      if (Date.now() - (pending.ts || 0) > 1500) return;
+
+      const normalizeWord = (w) =>
+        String(w || '')
+          .trim()
+          .toLowerCase()
+          .replace(/^[^a-z0-9']+|[^a-z0-9']+$/g, '');
+
+      const pendingWord = normalizeWord(pending.text);
+      const reportedMisspelling = normalizeWord(payload?.misspelledWord);
+
+      // If Electron reported a misspelling but it's clearly a different token, ignore.
+      if (reportedMisspelling && pendingWord && reportedMisspelling !== pendingWord) return;
+
+      // If Electron reports a misspelled word, attach suggestions to the doc range we computed.
+      if (payload?.misspelledWord) {
+        window.spellCheckWord = {
+          word: payload.misspelledWord,
+          from: pending.from,
+          to: pending.to,
+          suggestions: Array.isArray(payload.suggestions) ? payload.suggestions : [],
+        };
+      } else {
+        window.spellCheckWord = null;
+      }
+
+      // Consume this pending click so later context-menu events don't overwrite it.
+      pendingSpellcheckRef.current = null;
+
+      // Force context menu re-render so `EditorContextMenu` re-reads `window.spellCheckWord`.
+      setContextMenu((prev) => (prev ? { ...prev } : prev));
+    };
+
+    window.electronAPI.onSpellCheckContext(handler);
+    return () => {
+      window.electronAPI?.removeAllListeners?.('spellcheck-context');
+    };
+  }, []);
+  
+  // Helper function to get word at mouse position
+  const getWordAtPosition = (e) => {
+    if (!editor) return null;
+    
+    const pos = editor.view.posAtCoords({ left: e.clientX, top: e.clientY });
+    if (!pos) return null;
+    
+    const { doc } = editor.state;
+    const resolvedPos = doc.resolve(pos.pos);
+    const parent = resolvedPos.parent;
+    
+    // Check if parent node is a text block (paragraph, heading, etc.)
+    if (parent.isTextblock && parent.textContent) {
+      const text = parent.textContent;
+      const offset = resolvedPos.parentOffset;
+      
+      // Find word boundaries
+      let start = offset;
+      let end = offset;
+      
+      // Go backwards to find start
+      while (start > 0 && /\w/.test(text[start - 1])) {
+        start--;
+      }
+      
+      // Go forwards to find end
+      while (end < text.length && /\w/.test(text[end])) {
+        end++;
+      }
+      
+      // Must have found at least one character
+      if (start === end) return null;
+      
+      const word = text.slice(start, end);
+      
+      // Calculate absolute positions in the document
+      const nodeStart = resolvedPos.start();
+      const absoluteStart = nodeStart + start;
+      const absoluteEnd = nodeStart + end;
+      
+      return {
+        text: word,
+        from: absoluteStart,
+        to: absoluteEnd
+      };
+    }
+    
+    return null;
   };
 
   // --- NEW: Close context menu on click ---
@@ -467,7 +729,7 @@ const EditorLayout = () => {
             <button onClick={() => setShowInspector(!showInspector)} style={showInspector ? activeMagicBtnStyle : magicBtnStyle} title="Chapter Inspector">🔎</button>
         </div>
         <div style={rightStatusAreaStyle}>
-          <span style={{ fontSize: '11px', color: status === 'Saved' ? 'var(--text-muted)' : 'var(--accent)' }}>{status}</span>
+          <span style={{ fontSize: '11px', color: saveStatus === 'Saved' ? 'var(--text-muted)' : 'var(--accent)' }}>{saveStatus}</span>
         </div>
       </div>
 
@@ -478,7 +740,7 @@ const EditorLayout = () => {
           id="editor-workspace" 
           style={workspaceStyle} 
           className={`${isTypewriterMode ? 'typewriter-active' : ''} ${isFocusMode ? 'focus-mode-active' : ''}`}
-          onContextMenu={handleContextMenu} // <--- RIGHT-CLICK HANDLER
+          onContextMenu={handleContextMenu} // Custom menu fallback (native menu in Electron)
         >
           <div style={{
             ...pageContainerStyle,
@@ -510,11 +772,33 @@ const EditorLayout = () => {
       <EditorFooter editor={editor} />
       
       {/* CONTEXT MENU */}
-      {contextMenu && (
+      {!useNativeContextMenu && contextMenu && (
         <EditorContextMenu 
           editor={editor}
           position={contextMenu}
           onClose={() => setContextMenu(null)}
+        />
+      )}
+
+      {/* NATIVE CONTEXT MENU -> LORE MODALS */}
+      {nativeLoreAction?.mode === 'create' && (
+        <CreateLoreModal
+          selectedText={nativeLoreAction.text}
+          suggestedType={detectLoreType(nativeLoreAction.text)}
+          projectData={projectData}
+          setProjectData={setProjectData}
+          saveNowSilently={saveNowSilently}
+          onClose={() => setNativeLoreAction(null)}
+          editor={editor}
+        />
+      )}
+      {nativeLoreAction?.mode === 'addTo' && (
+        <AddToExistingModal
+          selectedText={nativeLoreAction.text}
+          projectData={projectData}
+          setProjectData={setProjectData}
+          saveNowSilently={saveNowSilently}
+          onClose={() => setNativeLoreAction(null)}
         />
       )}
 

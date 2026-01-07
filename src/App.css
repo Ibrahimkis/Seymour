@@ -3,11 +3,13 @@
   --bg-app: #2d2d2d;
   --bg-panel: #363636;
   --bg-header: #404040;
+  --bg-hover: #3a3a3a;
   --border: #1a1a1a;
   --text-main: #e0e0e0;
   --text-muted: #a0a0a0;
   --paper: #252525;
-  --accent: #5c8bd6; 
+  --accent: #5c8bd6;
+  --accent-hover: #6c9be6;
 }
 
 [data-theme='light'] {
@@ -15,11 +17,27 @@
   --bg-app: #f0f0f0;
   --bg-panel: #e5e5e5;
   --bg-header: #dcdcdc;
+  --bg-hover: #d5d5d5;
   --border: #cccccc;
   --text-main: #333333;
   --text-muted: #666666;
   --paper: #ffffff;
   --accent: #3b6db0;
+  --accent-hover: #4b7dc0;
+}
+
+[data-theme='lore'] {
+  /* LORE MODE - Seymour Feed Green */
+  --bg-app: #1a2520;
+  --bg-panel: #243329;
+  --bg-header: #2d3e36;
+  --bg-hover: #344740;
+  --border: #1a2016;
+  --text-main: #d4e8d4;
+  --text-muted: #8fa88f;
+  --paper: #1e2b24;
+  --accent: #6fc276;
+  --accent-hover: #7fd286;
 }
 
 body {
@@ -130,4 +148,36 @@ button { cursor: pointer; }
 /* 5. Corner (Where horizontal meets vertical) */
 ::-webkit-scrollbar-corner {
   background: transparent;
+}
+
+/* --- ANIMATIONS --- */
+@keyframes slideUp {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes scaleIn {
+  from {
+    transform: scale(0.95);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
 }

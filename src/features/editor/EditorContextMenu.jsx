@@ -6,7 +6,7 @@ import { useProject } from '../../context/ProjectContext';
 import CustomModal from '../../components/CustomModal';
 
 const EditorContextMenu = ({ editor, position, onClose }) => {
-  const { projectData, setProjectData } = useProject();
+  const { projectData, setProjectData, saveNowSilently } = useProject();
   const [showLoreModal, setShowLoreModal] = useState(false);
   const [modalMode, setModalMode] = useState(null); // 'create' or 'addTo'
   const [selectedText, setSelectedText] = useState('');
@@ -130,6 +130,19 @@ const EditorContextMenu = ({ editor, position, onClose }) => {
         }}
         onClick={(e) => e.stopPropagation()}
       >
+        {/* SPELL CHECK SUGGESTIONS (if clicked on misspelled word) */}
+        {spellSuggestions.length > 0 && (
+          <>
+            <div style={sectionStyle}>📖 Spelling Suggestions</div>
+            {spellSuggestions.slice(0, 5).map((suggestion, idx) => (
+              <button key={idx} onClick={() => handleSpellFix(suggestion)} style={itemStyle}>
+                ✓ {suggestion}
+              </button>
+            ))}
+            <div style={dividerStyle}></div>
+          </>
+        )}
+
         {/* GRAMMAR SUGGESTIONS (if clicked on underlined error) */}
         {grammarSuggestion && grammarSuggestion.replacements.length > 0 && (
           <>
@@ -176,6 +189,7 @@ const EditorContextMenu = ({ editor, position, onClose }) => {
           suggestedType={suggestedType}
           projectData={projectData}
           setProjectData={setProjectData}
+          saveNowSilently={saveNowSilently}
           onClose={() => {
             setShowLoreModal(false);
             onClose();
@@ -189,6 +203,7 @@ const EditorContextMenu = ({ editor, position, onClose }) => {
           selectedText={selectedText}
           projectData={projectData}
           setProjectData={setProjectData}
+          saveNowSilently={saveNowSilently}
           onClose={() => {
             setShowLoreModal(false);
             onClose();
@@ -202,7 +217,7 @@ const EditorContextMenu = ({ editor, position, onClose }) => {
 // ==========================================
 // CREATE NEW LORE CARD MODAL
 // ==========================================
-const CreateLoreModal = ({ selectedText, suggestedType, projectData, setProjectData, onClose, editor }) => {
+export const CreateLoreModal = ({ selectedText, suggestedType, projectData, setProjectData, saveNowSilently, onClose, editor }) => {
   const [name, setName] = useState(selectedText);
   const [type, setType] = useState(suggestedType);
   const [folder, setFolder] = useState('root_misc'); // Default folder
@@ -232,10 +247,12 @@ const CreateLoreModal = ({ selectedText, suggestedType, projectData, setProjectD
 
     // Add to project
     const newCharacters = [...(projectData.lore.characters || []), newEntity];
-    setProjectData({
+    const nextProject = {
       ...projectData,
       lore: { ...projectData.lore, characters: newCharacters }
-    });
+    };
+    setProjectData(nextProject);
+    saveNowSilently?.(nextProject);
 
     // Create smart link in editor if checkbox is checked
     if (createLink && editor) {
@@ -327,7 +344,7 @@ const CreateLoreModal = ({ selectedText, suggestedType, projectData, setProjectD
 // ==========================================
 // ADD TO EXISTING LORE CARD MODAL
 // ==========================================
-const AddToExistingModal = ({ selectedText, projectData, setProjectData, onClose }) => {
+export const AddToExistingModal = ({ selectedText, projectData, setProjectData, saveNowSilently, onClose }) => {
   const [selectedEntityId, setSelectedEntityId] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [showSuccess, setShowSuccess] = useState(false);
@@ -375,10 +392,12 @@ const AddToExistingModal = ({ selectedText, projectData, setProjectData, onClose
     const newCharacters = [...entities];
     newCharacters[entityIndex] = updatedEntity;
 
-    setProjectData({
+    const nextProject = {
       ...projectData,
       lore: { ...projectData.lore, characters: newCharacters }
-    });
+    };
+    setProjectData(nextProject);
+    saveNowSilently?.(nextProject);
 
     // Show success message
     setSuccessMessage(`Added to "${entity.name}" in Uncategorized section`);

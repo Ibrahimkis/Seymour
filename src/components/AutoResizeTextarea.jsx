@@ -1,6 +1,6 @@
 import React, { useRef, useEffect } from 'react';
 
-const AutoResizeTextarea = ({ value, onChange, placeholder, style }) => {
+const AutoResizeTextarea = ({ value, onChange, placeholder, style, autoFocus, onBlur }) => {
   const textareaRef = useRef(null);
 
   // Function to auto-grow the height
@@ -16,6 +16,12 @@ const AutoResizeTextarea = ({ value, onChange, placeholder, style }) => {
     adjustHeight();
   }, [value]); // Re-run whenever text changes
 
+  useEffect(() => {
+    if (autoFocus && textareaRef.current) {
+      textareaRef.current.focus();
+    }
+  }, [autoFocus]);
+
   return (
     <textarea
       ref={textareaRef}
@@ -24,6 +30,7 @@ const AutoResizeTextarea = ({ value, onChange, placeholder, style }) => {
         onChange(e.target.value);
         adjustHeight();
       }}
+      onBlur={onBlur}
       placeholder={placeholder}
       rows={1}
       style={{

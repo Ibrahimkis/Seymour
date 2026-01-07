@@ -2,13 +2,124 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="./vite.svg" />
+    <link rel="icon" type="image/x-icon" href="./Seymourico.ico.ico" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>seymour</title>
-    <script type="module" crossorigin src="./assets/index-DjDYNjRZ.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-DXcWUAKj.css">
+    <title>Seymour</title>
+    <style>
+      body, html {
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+      }
+      
+      #splash-screen {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10000;
+      }
+      
+      #splash-content {
+        background: rgba(40, 40, 40, 0.9);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 12px;
+        padding: 40px 60px;
+        text-align: center;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+        min-width: 400px;
+      }
+      
+      #splash-logo {
+        font-size: 64px;
+        margin-bottom: 20px;
+        animation: pulse 2s ease-in-out infinite;
+      }
+      
+      #splash-title {
+        margin: 0 0 10px 0;
+        font-size: 42px;
+        font-weight: bold;
+        color: #ffffff;
+        letter-spacing: 2px;
+        font-family: serif;
+      }
+      
+      #splash-tagline {
+        margin: 0 0 40px 0;
+        font-size: 14px;
+        color: #999;
+        font-style: italic;
+      }
+      
+      #splash-loader-container {
+        margin-bottom: 30px;
+      }
+      
+      #splash-loader-bar {
+        width: 100%;
+        height: 4px;
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 2px;
+        overflow: hidden;
+        margin-bottom: 10px;
+      }
+      
+      #splash-loader-fill {
+        height: 100%;
+        background: linear-gradient(90deg, #4a9eff, #7b68ee);
+        border-radius: 2px;
+        animation: fillLoader 2s ease-in-out infinite;
+      }
+      
+      #splash-loading-text {
+        margin: 0;
+        font-size: 13px;
+        color: #888;
+      }
+      
+      #splash-version {
+        margin: 0;
+        font-size: 12px;
+        color: #555;
+      }
+      
+      @keyframes pulse {
+        0%, 100% { transform: scale(1); }
+        50% { transform: scale(1.1); }
+      }
+      
+      @keyframes fillLoader {
+        0% { width: 0%; }
+        100% { width: 100%; }
+      }
+    </style>
+    <script type="module" crossorigin src="./assets/index-DxKq3gJp.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-BGQBMzJH.css">
   </head>
   <body>
+    <div id="splash-screen">
+      <div id="splash-content">
+        <div id="splash-logo">📚</div>
+        <h1 id="splash-title">Seymour</h1>
+        <p id="splash-tagline">The distraction-free environment for world builders</p>
+        
+        <div id="splash-loader-container">
+          <div id="splash-loader-bar">
+            <div id="splash-loader-fill"></div>
+          </div>
+          <p id="splash-loading-text">Loading your project...</p>
+        </div>
+        
+        <p id="splash-version">v0.1.0</p>
+      </div>
+    </div>
+    
     <div id="root"></div>
   </body>
 </html>

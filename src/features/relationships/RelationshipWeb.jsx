@@ -42,6 +42,28 @@ const RelationshipWeb = () => {
   const [modal, setModal] = useState({ isOpen: false, type: 'input', title: '', onConfirm: () => {} });
   const closeModal = () => setModal({ ...modal, isOpen: false });
 
+  // Listen for force save events
+  useEffect(() => {
+    const handleForceSave = () => {
+      // Force a data change to trigger save - use callback
+      setProjectData(prev => {
+        const rawData = prev?.relationships;
+        let currentGraphs = [];
+        if (Array.isArray(rawData) && rawData.length > 0) {
+          currentGraphs = rawData;
+        } else if (rawData && !Array.isArray(rawData) && (rawData.nodes || rawData.edges)) {
+          currentGraphs = [{ id: 'default', name: 'Main Graph', nodes: rawData.nodes || [], edges: rawData.edges || [] }];
+        } else {
+          currentGraphs = [{ id: 'default', name: 'Main Graph', nodes: [], edges: [] }];
+        }
+        return { ...prev, relationships: [...currentGraphs] };
+      });
+    };
+
+    window.addEventListener('force-save-all', handleForceSave);
+    return () => window.removeEventListener('force-save-all', handleForceSave);
+  }, [setProjectData]);
+
   // --- HELPER: UPDATE SPECIFIC GRAPH ---
   const updateCurrentGraph = (updates) => {
     const newGraphs = graphs.map(g => 
@@ -82,7 +104,16 @@ const RelationshipWeb = () => {
 
   const deleteTab = (graphId, e) => {
     e.stopPropagation();
-    if (graphs.length === 1) return alert("Cannot delete the last tab.");
+    if (graphs.length === 1) {
+      setModal({
+        isOpen: true,
+        type: 'confirm',
+        title: 'Cannot Delete',
+        message: 'Cannot delete the last tab.',
+        onConfirm: closeModal
+      });
+      return;
+    }
     setModal({
       isOpen: true, type: 'confirm', title: 'Delete Web', message: 'Are you sure? This cannot be undone.',
       onConfirm: () => {

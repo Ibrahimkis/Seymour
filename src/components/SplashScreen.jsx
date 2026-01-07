@@ -1,4 +1,5 @@
 import React from 'react';
+import packageJson from '../../package.json';
 
 const SplashScreen = () => {
   return (
@@ -15,7 +16,7 @@ const SplashScreen = () => {
           <p style={loadingTextStyle}>Loading your project...</p>
         </div>
         
-        <p style={versionStyle}>v0.1.0</p>
+        <p style={versionStyle}>v{packageJson.version}</p>
       </div>
       
       <style>{`

@@ -5,6 +5,7 @@ import { dbSet } from '../context/projectDb'; // For manual save before reload
 import CompileModal from './CompileModal';
 import ExportLoreModal from './ExportLoreModal';
 import CustomModal from './CustomModal'; // <--- We need the modal for New/Save As
+import packageJson from '../../package.json';
 
 // --- DEFAULT EMPTY STATE ---
 const EMPTY_PROJECT = {
@@ -25,9 +26,30 @@ const EMPTY_PROJECT = {
   worldMap: { imageSrc: null, pins: [] }
 };
 
-const MenuBar = ({ toggleTheme, isZenMode, toggleZenMode }) => {
-  const { projectData, setProjectData } = useProject();
+const MenuBar = ({ toggleTheme, isZenMode, toggleZenMode, onOpenSearch }) => {
+  const { projectData, setProjectData, setProjectId, setProjectFilePath, saveToCurrentPath, saveToDisk } = useProject();
   const navigate = useNavigate();
+
+  const inferProjectTitle = (existingTitle, filePath, fallbackProjectId) => {
+    const normalizedExisting = typeof existingTitle === 'string' ? existingTitle.trim() : '';
+    if (normalizedExisting && normalizedExisting.toLowerCase() !== 'untitled project') return normalizedExisting;
+
+    if (filePath && typeof filePath === 'string') {
+      const base = filePath.split(/[\\/]/).pop() || '';
+      const withoutExt = base.replace(/\.(json|seymour)$/i, '').trim();
+      if (withoutExt) return withoutExt;
+    }
+
+    if (fallbackProjectId && typeof fallbackProjectId === 'string') {
+      const fromId = fallbackProjectId
+        .replace(/[-_]+/g, ' ')
+        .replace(/\b\w/g, (c) => c.toUpperCase())
+        .trim();
+      if (fromId) return fromId;
+    }
+
+    return 'Untitled Project';
+  };
   
   // --- STATE ---
   const [activeMenu, setActiveMenu] = useState(null);
@@ -74,30 +96,53 @@ const MenuBar = ({ toggleTheme, isZenMode, toggleZenMode }) => {
     });
   };
 
+  // 1b. SWITCH PROJECT (Electron only)
+  const handleSwitchProject = async () => {
+    setActiveMenu(null);
+    if (!window.electronAPI) return;
+    
+    const result = await window.electronAPI.listProjects();
+    if (!result.success || !result.projects || result.projects.length === 0) {
+      setModal({
+        isOpen: true,
+        type: 'confirm',
+        title: 'No Projects',
+        message: 'No projects found.',
+        onConfirm: closeModal
+      });
+      return;
+    }
+    
+    setModal({
+      isOpen: true,
+      type: 'projectList',
+      title: 'Switch Project',
+      message: 'Select a project to open:',
+      projects: result.projects,
+      onConfirm: async (projectId) => {
+        const loadResult = await window.electronAPI.loadProjectFile(projectId);
+        if (loadResult.success) {
+          const inferredTitle = inferProjectTitle(loadResult.data?.title, loadResult.filePath || null, projectId);
+          setProjectData({ ...loadResult.data, title: inferredTitle });
+          setProjectId(projectId);
+          setProjectFilePath(loadResult.filePath || null);
+          navigate('/lore');
+        }
+        closeModal();
+      }
+    });
+  };
+
   // 2. SAVE (Quick)
-  const handleSave = () => {
-    downloadProject(projectData, projectData.title || 'project');
+  const handleSave = async () => {
+    await saveToCurrentPath();
     setActiveMenu(null);
   };
 
   // 3. SAVE AS (Rename & Save)
-  const handleSaveAs = () => {
+  const handleSaveAs = async () => {
+    await saveToDisk();
     setActiveMenu(null);
-    setModal({
-      isOpen: true,
-      type: 'input',
-      title: 'Save Project As...',
-      message: 'Enter a name for this version:',
-      defaultValue: projectData.title || 'New Project',
-      onConfirm: (newName) => {
-        // Update title in state first
-        const newData = { ...projectData, title: newName };
-        setProjectData(newData);
-        // Then download
-        downloadProject(newData, newName);
-        closeModal();
-      }
-    });
   };
 
   // Helper: Actual download logic
@@ -105,28 +150,70 @@ const MenuBar = ({ toggleTheme, isZenMode, toggleZenMode }) => {
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(data));
     const downloadAnchorNode = document.createElement('a');
     downloadAnchorNode.setAttribute("href", dataStr);
-    downloadAnchorNode.setAttribute("download", `${filename}.json`);
+    downloadAnchorNode.setAttribute("download", `${filename}.seymour`);
     document.body.appendChild(downloadAnchorNode);
     downloadAnchorNode.click();
     downloadAnchorNode.remove();
   };
 
   // 4. LOAD
-  const handleLoad = (e) => {
+  const handleLoadElectron = async () => {
+    if (!window.electronAPI?.openProjectDialog) return;
+    setActiveMenu(null);
+
+    const result = await window.electronAPI.openProjectDialog();
+    if (result.success && result.data) {
+      try {
+        const json = JSON.parse(result.data);
+        json.title = inferProjectTitle(json.title, result.filePath, null);
+
+        // Extract filename and projectId
+        const fileName = result.filePath.split(/[\\/]/).pop();
+        const newProjectId = fileName.replace(/\.(json|seymour)$/i, '').replace(/[^a-z0-9]/gi, '-').toLowerCase();
+
+        setProjectData(json);
+        setProjectId(newProjectId);
+        setProjectFilePath(result.filePath);
+        console.log(`✅ Loaded project from: ${result.filePath}`);
+        navigate('/lore');
+      } catch (err) {
+        console.error('Failed to load project:', err);
+      }
+    }
+  };
+
+  const handleLoadWeb = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
+
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = (evt) => {
       try {
-        const json = JSON.parse(e.target.result);
+        const json = JSON.parse(evt.target.result);
+        json.title = inferProjectTitle(json.title, null, file.name.replace(/\.(json|seymour)$/i, ''));
         setProjectData(json);
-        alert("Project Loaded Successfully!");
-        navigate('/'); // Go home after load
+        setModal({
+          isOpen: true,
+          type: 'confirm',
+          title: 'Success',
+          message: 'Project Loaded Successfully!',
+          onConfirm: () => {
+            closeModal();
+            navigate('/'); // Go home after load
+          }
+        });
       } catch (err) {
-        alert("Failed to load project file. It might be corrupted.");
+        setModal({
+          isOpen: true,
+          type: 'confirm',
+          title: 'Load Error',
+          message: 'Failed to load project file. It might be corrupted.',
+          onConfirm: closeModal
+        });
       }
     };
     reader.readAsText(file);
+    e.target.value = '';
     setActiveMenu(null);
   };
 
@@ -159,6 +246,7 @@ const MenuBar = ({ toggleTheme, isZenMode, toggleZenMode }) => {
         title={modal.title}
         message={modal.message}
         defaultValue={modal.defaultValue}
+        projects={modal.projects}
         onConfirm={modal.onConfirm}
         onCancel={closeModal}
       />
@@ -168,7 +256,7 @@ const MenuBar = ({ toggleTheme, isZenMode, toggleZenMode }) => {
         <div style={{ fontWeight: 'bold', marginRight: '20px', color: 'var(--accent)', letterSpacing: '1px' }}>
           SEYMOUR
           {/* Show current project title if available */}
-          {projectData.title && <span style={{fontWeight: 'normal', color: '#666', fontSize: '12px', marginLeft: '10px'}}>— {projectData.title}</span>}
+          {projectData?.title && <span style={{fontWeight: 'normal', color: '#666', fontSize: '12px', marginLeft: '10px'}}>— {projectData.title}</span>}
         </div>
 
         {/* MENUS */}
@@ -176,12 +264,19 @@ const MenuBar = ({ toggleTheme, isZenMode, toggleZenMode }) => {
           
           <Menu label="File" name="file">
             <button style={dropdownItemStyle} onClick={handleNewProject}>📄 New Project</button>
+            {window.electronAPI && (
+              <button style={dropdownItemStyle} onClick={handleSwitchProject}>🔄 Switch Project...</button>
+            )}
             <div style={{height: 1, background: '#444', margin: '5px 0'}}></div>
-            
-            <label style={dropdownItemStyle}>
-              📂 Load Project...
-              <input type="file" accept=".json" onChange={handleLoad} style={{ display: 'none' }} />
-            </label>
+
+            {window.electronAPI?.openProjectDialog ? (
+              <button style={dropdownItemStyle} onClick={handleLoadElectron}>📂 Load Project...</button>
+            ) : (
+              <label style={dropdownItemStyle}>
+                📂 Load Project...
+                <input type="file" accept=".seymour,.json" onChange={handleLoadWeb} style={{ display: 'none' }} />
+              </label>
+            )}
             
             <div style={{height: 1, background: '#444', margin: '5px 0'}}></div>
             <button style={dropdownItemStyle} onClick={handleSave}>💾 Save</button>
@@ -208,8 +303,8 @@ const MenuBar = ({ toggleTheme, isZenMode, toggleZenMode }) => {
           </Menu>
 
           <Menu label="View" name="view">
-            <button style={dropdownItemStyle} onClick={toggleTheme}>
-              🌗 Toggle Theme
+            <button style={dropdownItemStyle} onClick={() => { toggleTheme(); setActiveMenu(null); }}>
+              🎨 Toggle Theme
             </button>
             <button style={dropdownItemStyle} onClick={toggleZenMode}>
               {isZenMode ? 'Show Sidebars' : 'Zen Mode (Hide Sidebars)'}
@@ -217,11 +312,62 @@ const MenuBar = ({ toggleTheme, isZenMode, toggleZenMode }) => {
           </Menu>
 
           <Menu label="Help" name="help">
-            <button style={dropdownItemStyle} onClick={() => alert("Seymour v4.0\n\nThe Ultimate World Building Tool.")}>
+            <button style={dropdownItemStyle} onClick={() => {
+              setModal({
+                isOpen: true,
+                type: 'confirm',
+                title: 'About Seymour',
+                message: `Seymour v${packageJson.version}\n\nThe Ultimate World Building Tool.`,
+                onConfirm: closeModal
+              });
+              setActiveMenu(null);
+            }}>
                About Seymour
             </button>
           </Menu>
 
+        </div>
+
+        {/* RIGHT SIDE - SEARCH */}
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center' }}>
+          <button 
+            onClick={onOpenSearch}
+            style={{
+              background: 'transparent',
+              border: '1px solid var(--border)',
+              borderRadius: '6px',
+              padding: '4px 12px',
+              color: 'var(--text-muted)',
+              cursor: 'pointer',
+              fontSize: '13px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              transition: 'all 0.2s'
+            }}
+            onMouseEnter={(e) => {
+              e.target.style.background = 'var(--bg-hover)';
+              e.target.style.borderColor = 'var(--accent)';
+              e.target.style.color = 'var(--accent)';
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.background = 'transparent';
+              e.target.style.borderColor = 'var(--border)';
+              e.target.style.color = 'var(--text-muted)';
+            }}
+            title="Universal Search (Ctrl+K)"
+          >
+            <span>🔍</span>
+            <span>Search</span>
+            <kbd style={{
+              background: 'var(--bg-app)',
+              border: '1px solid var(--border)',
+              borderRadius: '3px',
+              padding: '2px 5px',
+              fontSize: '10px',
+              fontFamily: 'monospace'
+            }}>Ctrl+K</kbd>
+          </button>
         </div>
       </div>
 

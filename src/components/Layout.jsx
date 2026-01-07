@@ -4,7 +4,10 @@ import LeftPanel from './LeftPanel';
 import RightPanel from './RightPanel';
 import MenuBar from './MenuBar';
 import CommandPalette from './CommandPalette'; // <--- 1. Imported
+import UniversalSearch from './UniversalSearch';
+import SaveReminder from './SaveReminder';
 import { useProject } from '../context/ProjectContext';
+import packageJson from '../../package.json';
 
 const Layout = ({ theme, toggleTheme }) => {
   // --- LAYOUT STATE ---
@@ -14,15 +17,63 @@ const Layout = ({ theme, toggleTheme }) => {
   const [showLeft, setShowLeft] = useState(true);
   const [showRight, setShowRight] = useState(true);
 
+  // Save Reminder
+  const [showSaveReminder, setShowSaveReminder] = useState(false);
+
+  // Universal Search
+  const [showUniversalSearch, setShowUniversalSearch] = useState(false);
+
   // FIXED WIDTHS
   const leftWidth = 220; 
   const rightWidth = 250;
 
-  const { saveToDisk } = useProject();
+  const { saveToDisk, saveToCurrentPath, saveStatus, autoSaveEnabled, projectFilePath, projectId } = useProject();
+
+  // Save reminder timer (1 hour)
+  useEffect(() => {
+    const oneHour = 60 * 60 * 1000; // 3600000ms
+    
+    const timer = setTimeout(() => {
+      setShowSaveReminder(true);
+    }, oneHour);
+
+    return () => clearTimeout(timer);
+  }, []);
 
   const toggleZen = () => {
     setIsZenMode(!isZenMode);
   };
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      // Ctrl+B - Toggle Binder
+      if (e.ctrlKey && e.key === 'b') {
+        e.preventDefault();
+        setShowLeft(prev => !prev);
+      }
+      // Ctrl+L - Toggle Lore Panel
+      if (e.ctrlKey && e.key === 'l') {
+        e.preventDefault();
+        setShowRight(prev => !prev);
+      }
+      // Ctrl+K - Universal Search
+      if (e.ctrlKey && e.key === 'k') {
+        e.preventDefault();
+        setShowUniversalSearch(true);
+      }
+      // Ctrl+S - Manual Save
+      if (e.ctrlKey && e.key === 's') {
+        e.preventDefault();
+        saveToCurrentPath();
+      }
+      // Ctrl+F - Focus search (will be handled by individual panels)
+      // Ctrl+N - New chapter (will be handled by LeftPanel)
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [saveToCurrentPath]);
 
   // Menu IPC handlers for native Electron menu
   useEffect(() => {
@@ -60,26 +111,30 @@ const Layout = ({ theme, toggleTheme }) => {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: 'var(--bg-app)', color: 'var(--text-main)', overflow: 'hidden' }}>
       
-      {/* 2. RENDER COMMAND PALETTE (Pass Props) */}
+      {/* COMMAND PALETTE */}
       <CommandPalette toggleTheme={toggleTheme} toggleZenMode={toggleZen} />
+
+      {/* UNIVERSAL SEARCH (Ctrl+K) */}
+      <UniversalSearch isOpen={showUniversalSearch} onClose={() => setShowUniversalSearch(false)} />
 
       {/* 1. TOP MENU BAR */}
       <MenuBar 
         toggleTheme={toggleTheme} 
         isZenMode={isZenMode} 
-        toggleZenMode={toggleZen} 
+        toggleZenMode={toggleZen}
+        onOpenSearch={() => setShowUniversalSearch(true)}
       />
 
       {/* 2. TOOLBAR / TOGGLES */}
       {!isZenMode && (
         <div style={subHeaderStyle}>
-          <button onClick={() => setShowLeft(!showLeft)} style={toggleBtnStyle} title="Toggle Binder">
+          <button onClick={() => setShowLeft(!showLeft)} style={toggleBtnStyle} title="Toggle Binder (Ctrl+B)">
             {showLeft ? '◀ Binder' : '▶ Show Binder'}
           </button>
           
           <div style={{flex:1}}></div>
           
-          <button onClick={() => setShowRight(!showRight)} style={toggleBtnStyle} title="Toggle Lore Panel">
+          <button onClick={() => setShowRight(!showRight)} style={toggleBtnStyle} title="Toggle Lore Panel (Ctrl+L)">
             {showRight ? 'Lore & Notes ▶' : '◀ Show Lore'}
           </button>
         </div>
@@ -89,14 +144,16 @@ const Layout = ({ theme, toggleTheme }) => {
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
         
         {/* LEFT PANEL WRAPPER */}
-        {!isZenMode && showLeft && (
+        {!isZenMode && (
           <div style={{ 
-            width: leftWidth, 
+            width: showLeft ? leftWidth : 0, 
             display: 'flex', 
             flexShrink: 0,
-            borderRight: '1px solid var(--border)' 
+            borderRight: showLeft ? '1px solid var(--border)' : 'none',
+            transition: 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+            overflow: 'hidden'
           }}>
-            <div style={{ flex: 1, overflow: 'hidden' }}><LeftPanel /></div>
+            <div style={{ flex: 1, overflow: 'hidden', width: leftWidth }}><LeftPanel /></div>
           </div>
         )}
 
@@ -106,23 +163,54 @@ const Layout = ({ theme, toggleTheme }) => {
         </main>
 
         {/* RIGHT PANEL WRAPPER */}
-        {!isZenMode && showRight && (
+        {!isZenMode && (
           <div style={{ 
-            width: rightWidth, 
+            width: showRight ? rightWidth : 0, 
             display: 'flex', 
             flexShrink: 0,
-            borderLeft: '1px solid var(--border)' 
+            borderLeft: showRight ? '1px solid var(--border)' : 'none',
+            transition: 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+            overflow: 'hidden'
           }}>
-            <div style={{ flex: 1, overflow: 'hidden' }}><RightPanel /></div>
+            <div style={{ flex: 1, overflow: 'hidden', width: rightWidth }}><RightPanel /></div>
           </div>
         )}
+
+      {/* SAVE REMINDER NOTIFICATION */}
+      {showSaveReminder && (
+        <SaveReminder
+          onSave={() => {
+            saveToCurrentPath();
+            setShowSaveReminder(false);
+          }}
+          onSaveAs={() => {
+            saveToDisk(); // This will open the Save As dialog
+            setShowSaveReminder(false);
+          }}
+          onDismiss={() => {
+            setShowSaveReminder(false);
+            // Set reminder to show again in 30 minutes
+            setTimeout(() => {
+              setShowSaveReminder(true);
+            }, 30 * 60 * 1000); // 1800000ms
+          }}
+        />
+      )}
         
       </div>
 
       {/* 4. STATUS FOOTER */}
       <footer style={styles.footer}>
-        <span>Ready.</span>
-        <span>Auto-Save: Active</span>
+        <span>Seymour v{packageJson.version}</span>
+        <div style={{ display: 'flex', gap: '20px', alignItems: 'center', flex: 1, justifyContent: 'center' }}>
+          <span title={projectFilePath || `Project ID: ${projectId}`} style={{ maxWidth: '400px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '11px', color: 'var(--text-muted)' }}>
+            📁 {projectFilePath || `[${projectId}]`}
+          </span>
+        </div>
+        <div style={{ display: 'flex', gap: '20px', alignItems: 'center' }}>
+          <span>Auto-Save: {autoSaveEnabled ? 'Active' : 'Inactive'}</span>
+          <span style={{ color: saveStatus === 'Saved' ? 'var(--text-muted)' : 'var(--accent)' }}>{saveStatus}</span>
+        </div>
       </footer>
     </div>
   );
