@@ -273,7 +273,6 @@ const RightPanel = () => {
               <span>OMNIBUS TREE</span>
               <div style={{ display: 'flex', gap: '5px' }}>
                 <button onClick={() => createFolder(null)} className="icon-btn" style={{ fontSize: '14px', fontWeight: 'bold', opacity: 1 }} title="Create New Category">📂+</button>
-                <button onClick={() => createItem(null)} className="icon-btn" style={{ fontSize: '14px', fontWeight: 'bold', opacity: 1 }} title="Create New Entity">📝+</button>
               </div>
             </div>
             

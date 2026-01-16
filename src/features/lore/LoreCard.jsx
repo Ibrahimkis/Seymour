@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { DragDropContext, Droppable, Draggable } from 'react-beautiful-dnd';
 import { useSearchParams } from 'react-router-dom';
 import AutoResizeTextarea from '../../components/AutoResizeTextarea';
 import LoreLinkedText from '../../components/LoreLinkedText';
@@ -357,33 +358,33 @@ const DatabaseExplorer = ({ projectData, setProjectData, saveNowSilently, search
         </div>
       </div>
 
-      {/* GRID */}
-      <div style={gridContainerStyle}>
-        {currentFolders.map(folder => (
-          <div key={folder.id} onClick={() => openFolder(folder.id)} style={cardStyle} className="explorer-card">
-            <div style={{ fontSize: '40px', marginBottom: '10px' }}>📁</div>
-            <div style={cardNameStyle}>{folder.name}</div>
-            <div style={cardMetaStyle}>Folder</div>
-            <div style={{position: 'absolute', top: 5, right: 5, cursor: 'pointer', color: '#666'}} onClick={(e) => { e.stopPropagation(); deleteItem(folder.id, 'folder'); }}>✕</div>
-          </div>
-        ))}
-        {currentItems.map(item => (
-          <div key={item.id} onClick={() => openItem(item.id)} style={{...cardStyle, height: '240px'}} className="explorer-card">
-            <div style={thumbnailContainerStyle}>
-              {item.imageSrc ? (<div style={{ width: '100%', height: '100%', ...item.imageStyles, backgroundImage: `url(${item.imageSrc})`, backgroundRepeat: 'no-repeat', backgroundSize: 'cover' }} />) : (<span style={{ fontSize: '30px' }}>📍</span>)}
+      {/* SCROLLABLE GRID */}
+      <div style={{maxHeight: '60vh', overflowY: 'auto', border: '1px solid var(--border)', borderRadius: '8px', background: 'var(--bg-panel)', marginBottom: '20px'}}>
+        <div style={gridContainerStyle}>
+          {currentFolders.map(folder => (
+            <div key={folder.id} onClick={() => openFolder(folder.id)} style={cardStyle} className="explorer-card">
+              <div style={{ fontSize: '40px', marginBottom: '10px' }}>📁</div>
+              <div style={cardNameStyle}>{folder.name}</div>
+              <div style={cardMetaStyle}>Folder</div>
+              <div style={{position: 'absolute', top: 5, right: 5, cursor: 'pointer', color: '#666'}} onClick={(e) => { e.stopPropagation(); deleteItem(folder.id, 'folder'); }}>✕</div>
             </div>
-            <div style={cardNameStyle}>{item.name}</div>
-            <div style={cardMetaStyle}>{item.type || 'Entity'}</div>
-            
-            {/* BIO SNIPPET */}
-            <div style={snippetStyle}>
-              {getBioSnippet(item) || <span style={{fontStyle:'italic', opacity:0.5}}>No description...</span>}
+          ))}
+          {currentItems.map(item => (
+            <div key={item.id} onClick={() => openItem(item.id)} style={{...cardStyle, height: '240px'}} className="explorer-card">
+              <div style={thumbnailContainerStyle}>
+                {item.imageSrc ? (<div style={{ width: '100%', height: '100%', ...item.imageStyles, backgroundImage: `url(${item.imageSrc})`, backgroundRepeat: 'no-repeat', backgroundSize: 'cover' }} />) : (<span style={{ fontSize: '30px' }}>📍</span>)}
+              </div>
+              <div style={cardNameStyle}>{item.name}</div>
+              <div style={cardMetaStyle}>{item.type || 'Entity'}</div>
+              {/* BIO SNIPPET */}
+              <div style={snippetStyle}>
+                {getBioSnippet(item) || <span style={{fontStyle:'italic', opacity:0.5}}>No description...</span>}
+              </div>
+              <div style={{position: 'absolute', top: 5, right: 5, cursor: 'pointer', color: '#666'}} onClick={(e) => { e.stopPropagation(); deleteItem(item.id, 'item'); }}>✕</div>
             </div>
-
-            <div style={{position: 'absolute', top: 5, right: 5, cursor: 'pointer', color: '#666'}} onClick={(e) => { e.stopPropagation(); deleteItem(item.id, 'item'); }}>✕</div>
-          </div>
-        ))}
-        {currentFolders.length === 0 && currentItems.length === 0 && (<div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '50px', color: 'var(--text-muted)' }}>This folder is empty.</div>)}
+          ))}
+          {currentFolders.length === 0 && currentItems.length === 0 && (<div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '50px', color: 'var(--text-muted)' }}>This folder is empty.</div>)}
+        </div>
       </div>
     </div>
   );
@@ -413,7 +414,7 @@ const CharacterSheet = ({ character, projectData, setProjectData, saveNowSilentl
     };
   }, []);
 
-  const updateCharacter = (updates) => {
+  const updateCharacter = useCallback((updates) => {
     const newLore = { ...projectData.lore };
     const updatedChar = { ...character, ...updates };
     newLore.characters[charIndex] = updatedChar;
@@ -426,7 +427,7 @@ const CharacterSheet = ({ character, projectData, setProjectData, saveNowSilentl
     pendingSaveTimerRef.current = setTimeout(() => {
       saveNowSilently?.(nextProject);
     }, 350);
-  };
+  }, [projectData, character, charIndex, setProjectData, saveNowSilently]);
 
   // Listen for force save events (when user clicks away from lore card)
   useEffect(() => {
@@ -491,6 +492,32 @@ const CharacterSheet = ({ character, projectData, setProjectData, saveNowSilentl
   const handleRemoveLink = (linkId) => {
     const manualLinks = (character.manualLinks || []).filter(l => l.id !== linkId);
     updateCharacter({ manualLinks });
+  };
+
+  const handleRemoveAllLinks = () => {
+    const linkCount = (character.manualLinks || []).length;
+    
+    if (linkCount === 0) {
+      setModal({
+        isOpen: true,
+        type: 'confirm',
+        title: 'No Links',
+        message: 'There are no manual links to remove.',
+        onConfirm: closeModal
+      });
+      return;
+    }
+    
+    setModal({
+      isOpen: true,
+      type: 'confirm',
+      title: 'Remove All Links?',
+      message: `Remove all ${linkCount} manual link(s)? This will clear your custom link mappings.`,
+      onConfirm: () => {
+        updateCharacter({ manualLinks: [] });
+        closeModal();
+      }
+    });
   };
 
   // HANDLERS
@@ -683,7 +710,7 @@ const CharacterSheet = ({ character, projectData, setProjectData, saveNowSilentl
           </div>
 
           {/* LINK LORE BUTTON */}
-          <div style={{ marginTop: '10px' }}>
+          <div style={{ marginTop: '10px', display: 'flex', gap: '10px', alignItems: 'center' }}>
             <button 
               onClick={handleCreateLink}
               style={{
@@ -699,8 +726,23 @@ const CharacterSheet = ({ character, projectData, setProjectData, saveNowSilentl
             >
               🔗 Link Lore
             </button>
-            <span style={{ fontSize: '10px', color: 'var(--text-muted)', marginLeft: '8px' }}>
-              Select text, then click to link to another entity
+            <button 
+              onClick={handleRemoveAllLinks}
+              style={{
+                background: 'var(--bg-header)',
+                border: '1px solid var(--border)',
+                color: 'var(--text-main)',
+                padding: '6px 12px',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '12px',
+                fontWeight: 'bold'
+              }}
+            >
+              🔓 Unlink All
+            </button>
+            <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+              Select text, then click Link to connect to another entity
             </span>
           </div>
 
@@ -779,26 +821,112 @@ const CharacterSheet = ({ character, projectData, setProjectData, saveNowSilentl
       </div>
 
       {/* SECTIONS */}
-      {(character.sections || []).map((section) => (
-        <div key={section.id} style={{ marginBottom: '40px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', marginBottom: '15px', borderBottom: '1px solid var(--border)' }}>
-            <input type="text" value={section.title} onChange={(e) => updateSectionTitle(section.id, e.target.value)} style={sectionTitleStyle} />
-            <button onClick={() => deleteSection(section.id)} style={deleteBtnStyle}>Delete Section</button>
-          </div>
-          <div style={gridStyle}>
-            {section.blocks.map((block) => (
-              <div key={block.id} style={blockStyle}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}>
-                  <input type="text" value={block.label} onChange={(e) => updateBlock(section.id, block.id, 'label', e.target.value)} style={labelInputStyle} />
-                  <button onClick={() => deleteBlock(section.id, block.id)} style={xBtnStyle}>✕</button>
+      <DragDropContext
+        onDragEnd={(result) => {
+          const { source, destination } = result;
+          if (!destination) return;
+          if (
+            source.droppableId === destination.droppableId &&
+            source.index === destination.index
+          ) {
+            return;
+          }
+          const sourceSectionIdx = character.sections.findIndex(s => s.id.toString() === source.droppableId);
+          const destSectionIdx = character.sections.findIndex(s => s.id.toString() === destination.droppableId);
+          if (sourceSectionIdx === -1 || destSectionIdx === -1) return;
+          const sourceSection = character.sections[sourceSectionIdx];
+          const destSection = character.sections[destSectionIdx];
+          const movingBlock = sourceSection.blocks[source.index];
+
+          // Remove from source section
+          const newSourceBlocks = Array.from(sourceSection.blocks);
+          newSourceBlocks.splice(source.index, 1);
+
+          // Insert into destination section
+          const newDestBlocks = Array.from(destSection.blocks);
+          newDestBlocks.splice(destination.index, 0, movingBlock);
+
+          const newSections = character.sections.map((section, idx) => {
+            if (idx === sourceSectionIdx && idx === destSectionIdx) {
+              // Same section, just reordering
+              return { ...section, blocks: newDestBlocks };
+            } else if (idx === sourceSectionIdx) {
+              return { ...section, blocks: newSourceBlocks };
+            } else if (idx === destSectionIdx) {
+              return { ...section, blocks: newDestBlocks };
+            } else {
+              return section;
+            }
+          });
+          updateCharacter({ sections: newSections });
+        }}
+      >
+        {(character.sections || []).map((section) => (
+          <div key={section.id} style={{ marginBottom: '40px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: '15px', borderBottom: '1px solid var(--border)' }}>
+              <input type="text" value={section.title} onChange={(e) => updateSectionTitle(section.id, e.target.value)} style={sectionTitleStyle} />
+              <button onClick={() => deleteSection(section.id)} style={deleteBtnStyle}>Delete Section</button>
+            </div>
+            <Droppable droppableId={section.id.toString()} direction="vertical">
+              {(provided, snapshot) => (
+                <div
+                  ref={provided.innerRef}
+                  {...provided.droppableProps}
+                  style={{ ...gridStyle, background: snapshot.isDraggingOver ? 'var(--bg-header)' : undefined }}
+                >
+                  {(section.blocks || []).map((block, idx) => (
+                    <Draggable key={String(block.id)} draggableId={String(block.id)} index={idx}>
+                      {(provided, snapshot) => (
+                        <div
+                          ref={provided.innerRef}
+                          {...provided.draggableProps}
+                          style={{
+                            ...blockStyle,
+                            ...provided.draggableProps.style,
+                            boxShadow: snapshot.isDragging ? '0 4px 16px rgba(0,0,0,0.15)' : blockStyle.boxShadow,
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px', alignItems: 'center' }}>
+                            <span
+                              {...provided.dragHandleProps}
+                              style={{
+                                background: 'none',
+                                border: 'none',
+                                cursor: snapshot.isDragging ? 'grabbing' : 'grab',
+                                fontSize: '16px',
+                                marginRight: '8px',
+                                color: '#aaa',
+                                padding: 0,
+                                lineHeight: 1,
+                                display: 'flex',
+                                alignItems: 'center',
+                                outline: 'none',
+                              }}
+                              title="Drag to move"
+                            >
+                              <span style={{fontSize: '18px'}}>≡</span>
+                            </span>
+                            <input type="text" value={block.label} onChange={(e) => updateBlock(section.id, block.id, 'label', e.target.value)} style={labelInputStyle} />
+                            <button onClick={() => deleteBlock(section.id, block.id)} style={xBtnStyle}>✕</button>
+                          </div>
+                          <div style={contentBoxStyle}><LoreLinkedText value={block.content} onChange={(val) => updateBlock(section.id, block.id, 'content', val)} manualLinks={manualLinks} /></div>
+                        </div>
+                      )}
+                    </Draggable>
+                  ))}
+                  {provided.placeholder}
+                  {(!section.blocks || section.blocks.length === 0) && (
+                    <div style={{ minHeight: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: '12px', border: '1px dashed var(--border)', borderRadius: '4px', marginBottom: '10px' }}>
+                      Drop a field here
+                    </div>
+                  )}
+                  <button onClick={() => addBlock(section.id)} style={addBlockBtnStyle}>+ Add Field</button>
                 </div>
-                <div style={contentBoxStyle}><LoreLinkedText value={block.content} onChange={(val) => updateBlock(section.id, block.id, 'content', val)} manualLinks={manualLinks} /></div>
-              </div>
-            ))}
-            <button onClick={() => addBlock(section.id)} style={addBlockBtnStyle}>+ Add Field</button>
+              )}
+            </Droppable>
           </div>
-        </div>
-      ))}
+        ))}
+      </DragDropContext>
       <button onClick={addSection} style={addSectionBtnStyle}>+ Create New Section</button>
     </div>
   );

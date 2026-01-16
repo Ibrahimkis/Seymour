@@ -1,0 +1,2 @@
+// Drag-and-drop for LoreCard attributes will use react-beautiful-dnd for a robust experience.
+// This file is a placeholder for dependency installation tracking.

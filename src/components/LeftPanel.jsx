@@ -28,11 +28,6 @@ const LeftPanel = () => {
         e.preventDefault();
         handleAddChapter();
       }
-      // Ctrl+F - Focus Search
-      if (e.ctrlKey && e.key === 'f') {
-        e.preventDefault();
-        searchInputRef.current?.focus();
-      }
     };
 
     window.addEventListener('keydown', handleKeyDown);

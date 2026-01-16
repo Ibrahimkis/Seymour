@@ -181,3 +181,22 @@ button { cursor: pointer; }
     opacity: 1;
   }
 }
+
+/* Scene node box base style */
+.scene-node-box {
+  border: 2px solid transparent;
+  background: rgba(92,139,214,0.12);
+  border-radius: 8px;
+  padding: 18px 16px;
+  margin: 12px 0;
+  position: relative;
+  width: 100%;
+  box-sizing: border-box;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.scene-node-box.has-focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-hover);
+  opacity: 1 !important;
+}

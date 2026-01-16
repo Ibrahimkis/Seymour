@@ -7,14 +7,14 @@ const LoreLinkedText = ({ value, onChange, placeholder, style, editable = true, 
   const [isEditing, setIsEditing] = useState(false);
   const { projectData } = useProject();
   const navigate = useNavigate();
-  const textareaRef = useRef(null);
+  const containerRef = useRef(null);
 
-  // Auto-enable editing when field becomes empty
+  // Only auto-edit if field is truly empty on first render
   useEffect(() => {
-    if (!value || value.trim() === '') {
+    if ((!value || value.trim() === '') && !isEditing) {
       setIsEditing(true);
     }
-  }, [value]);
+  }, []); // Empty dependency - only on mount
 
   // Helper function to escape HTML
   const escapeHtml = (text) => {
@@ -133,21 +133,29 @@ const LoreLinkedText = ({ value, onChange, placeholder, style, editable = true, 
     }
   };
 
-  const handleBlur = () => {
-    setIsEditing(false);
+  const handleBlur = (e) => {
+    // Only exit edit mode if clicking completely outside
+    // Use setTimeout to allow click events to process first
+    setTimeout(() => {
+      if (containerRef.current && !containerRef.current.contains(document.activeElement)) {
+        setIsEditing(false);
+      }
+    }, 100);
   };
 
   // If editing or no value, show textarea
   if (isEditing || !value || value.trim() === '') {
     return (
-      <AutoResizeTextarea
-        value={value}
-        onChange={onChange}
-        placeholder={placeholder}
-        style={style}
-        autoFocus={isEditing}
-        onBlur={editable ? handleBlur : undefined}
-      />
+      <div ref={containerRef}>
+        <AutoResizeTextarea
+          value={value}
+          onChange={onChange}
+          placeholder={placeholder}
+          style={style}
+          autoFocus={isEditing}
+          onBlur={editable ? handleBlur : undefined}
+        />
+      </div>
     );
   }
 

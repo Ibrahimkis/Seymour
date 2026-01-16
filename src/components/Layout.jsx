@@ -62,12 +62,13 @@ const Layout = ({ theme, toggleTheme }) => {
         e.preventDefault();
         setShowUniversalSearch(true);
       }
+      // Ctrl+F - Toggle Editor Search Bar (handled by EditorLayout)
+      // (No-op here, handled in EditorLayout)
       // Ctrl+S - Manual Save
       if (e.ctrlKey && e.key === 's') {
         e.preventDefault();
         saveToCurrentPath();
       }
-      // Ctrl+F - Focus search (will be handled by individual panels)
       // Ctrl+N - New chapter (will be handled by LeftPanel)
     };
 

@@ -5,7 +5,8 @@ import Image from '@tiptap/extension-image';
 import TextAlign from '@tiptap/extension-text-align';
 import Placeholder from '@tiptap/extension-placeholder';
 import CharacterCount from '@tiptap/extension-character-count';
-import Focus from '@tiptap/extension-focus'; 
+import Focus from '@tiptap/extension-focus';
+import { SearchHighlight } from './SearchHighlight';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 
 import EditorToolbar from './EditorToolbar';
@@ -14,6 +15,7 @@ import LoreHoverCard from './LoreHoverCard';
 import TypographyControls from './TypographyControls'; 
 import ChapterInspector from './ChapterInspector';
 import EditorContextMenu, { CreateLoreModal, AddToExistingModal } from './EditorContextMenu'; // <--- NEW IMPORT
+import SceneModal from './SceneModal';
 import CustomModal from '../../components/CustomModal';
 import { useProject } from '../../context/ProjectContext';
 import { LoreMark } from './LoreExtension';
@@ -67,8 +69,13 @@ const EditorLayout = () => {
   const [isTypewriterMode, setIsTypewriterMode] = useState(false);
   const [isFocusMode, setIsFocusMode] = useState(false);
   const [showInspector, setShowInspector] = useState(true);
+  const [showToolbar, setShowToolbar] = useState(true);
   const [showUnsavedWarning, setShowUnsavedWarning] = useState(false);
   const [pendingChapterId, setPendingChapterId] = useState(null);
+  const [focusedSceneId, setFocusedSceneId] = useState(null);
+  const [showSceneModal, setShowSceneModal] = useState(false);
+  const [sceneSelection, setSceneSelection] = useState({ from: 0, to: 0, text: '' });
+  const [errorModal, setErrorModal] = useState({ isOpen: false, title: '', message: '' });
   
   // --- NEW: Context Menu State ---
   const [contextMenu, setContextMenu] = useState(null);
@@ -142,6 +149,11 @@ const EditorLayout = () => {
   }, []); // Empty dependency - only load fonts once on mount
 
   // --- EDITOR ENGINE ---
+  const openEditScene = (sceneId) => {
+    setEditingSceneId(sceneId);
+    setShowSceneModal(true);
+  };
+
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -158,6 +170,7 @@ const EditorLayout = () => {
         className: 'has-focus',
         mode: 'all',
       }),
+      SearchHighlight,
     ],
     content: '', // Initialize empty - content loaded by useEffect
     editorProps: { 
@@ -165,6 +178,7 @@ const EditorLayout = () => {
         class: 'seymour-editor',
         spellcheck: 'true' // <--- ENABLE SPELL CHECK
       },
+      openEditScene,
     },
     onCreate: ({ editor }) => {
       // Set the current chapter ID when editor is created
@@ -451,6 +465,184 @@ const EditorLayout = () => {
     setTimeout(() => setSaveStatus('Saved'), 2000);
   };
 
+  const removeSmartLinks = () => {
+    if (!editor) return;
+    
+    // Remove all loreLink marks from the document
+    const { from, to } = editor.state.selection;
+    
+    if (from === to) {
+      // No selection, remove all lore links in the document
+      const chain = editor.chain().focus();
+      editor.state.doc.descendants((node, pos) => {
+        if (node.marks) {
+          node.marks.forEach(mark => {
+            if (mark.type.name === 'loreLink') {
+              chain.setTextSelection({ from: pos, to: pos + node.nodeSize }).unsetMark('loreLink');
+            }
+          });
+        }
+      });
+      chain.run();
+      setSaveStatus('Links Removed!');
+    } else {
+      // Remove lore links only in selection
+      editor.chain().focus().unsetMark('loreLink').run();
+      setSaveStatus('Selection Unlinked!');
+    }
+    
+    setTimeout(() => setSaveStatus('Saved'), 2000);
+  };
+
+  const createSceneFromSelection = () => {
+    if (!editor) return;
+    const { from, to } = editor.state.selection;
+    if (from === to) {
+      setErrorModal({
+        isOpen: true,
+        title: 'No Text Selected',
+        message: 'Please select text in your chapter to create a scene.'
+      });
+      return;
+    }
+    const selectedText = editor.state.doc.textBetween(from, to, ' ');
+    setSceneSelection({ from, to, text: selectedText });
+    setShowSceneModal(true);
+  };
+
+  const handleSaveScene = (sceneData) => {
+    const newScene = {
+      id: Date.now(),
+      ...sceneData,
+      startPos: sceneSelection.from,
+      endPos: sceneSelection.to,
+      createdAt: new Date().toISOString()
+    };
+    
+    const updatedChapter = {
+      ...chapter,
+      scenes: [...(chapter.scenes || []), newScene]
+    };
+    
+    const newChapters = [...chapters];
+    newChapters[chapterIndex] = updatedChapter;
+    setProjectData({
+      ...projectData,
+      manuscript: { ...projectData.manuscript, chapters: newChapters }
+    });
+    
+    setShowSceneModal(false);
+    setSaveStatus('Scene Created!');
+    setTimeout(() => setSaveStatus('Saved'), 2000);
+  };
+
+  const focusOnScene = (sceneId) => {
+    if (focusedSceneId === sceneId) {
+      setFocusedSceneId(null);
+      // Remove all scene-focused classes
+      const editorElement = document.querySelector('.ProseMirror');
+      if (editorElement) {
+        editorElement.querySelectorAll('.scene-focused').forEach(el => {
+          el.classList.remove('scene-focused');
+        });
+      }
+      return;
+    }
+    
+    const scene = chapter.scenes?.find(s => s.id === sceneId);
+    if (!scene || !editor) return;
+    
+    setFocusedSceneId(sceneId);
+    
+    // Scroll to scene position and select the range
+    editor.commands.focus();
+    editor.commands.setTextSelection({ from: scene.startPos, to: scene.endPos });
+    
+    // Find the DOM element and scroll it into view
+    setTimeout(() => {
+      const editorElement = document.querySelector('.ProseMirror');
+      if (editorElement) {
+        // Remove all previous scene-focused classes
+        editorElement.querySelectorAll('.scene-focused').forEach(el => {
+          el.classList.remove('scene-focused');
+        });
+        
+        // Find all paragraph elements and apply scene-focused class to those in range
+        const walker = document.createTreeWalker(
+          editorElement,
+          NodeFilter.SHOW_ELEMENT,
+          null
+        );
+        
+        let node;
+        let currentPos = 0;
+        while (node = walker.nextNode()) {
+          if (node.nodeName === 'P' || node.nodeName === 'H1' || node.nodeName === 'H2') {
+            const textLength = node.textContent.length;
+            const nodeEnd = currentPos + textLength;
+            
+            if (currentPos >= scene.startPos && nodeEnd <= scene.endPos) {
+              node.classList.add('scene-focused');
+            }
+            
+            currentPos = nodeEnd + 1; // +1 for paragraph break
+          }
+        }
+        
+        // Scroll to first scene element
+        const firstSceneElement = editorElement.querySelector('.scene-focused');
+        if (firstSceneElement) {
+          firstSceneElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }
+    }, 100);
+  };
+
+  const updateScene = (sceneId, updates) => {
+    const updatedChapter = {
+      ...chapter,
+      scenes: (chapter.scenes || []).map(s => 
+        s.id === sceneId ? { ...s, ...updates } : s
+      )
+    };
+    
+    const newChapters = [...chapters];
+    newChapters[chapterIndex] = updatedChapter;
+    setProjectData({
+      ...projectData,
+      manuscript: { ...projectData.manuscript, chapters: newChapters }
+    });
+  };
+
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [pendingDeleteSceneId, setPendingDeleteSceneId] = useState(null);
+
+  const deleteScene = (sceneId) => {
+    setPendingDeleteSceneId(sceneId);
+    setShowDeleteModal(true);
+  };
+
+  const confirmDeleteScene = () => {
+    if (!pendingDeleteSceneId) return;
+    const updatedChapter = {
+      ...chapter,
+      scenes: (chapter.scenes || []).filter(s => s.id !== pendingDeleteSceneId)
+    };
+    const newChapters = [...chapters];
+    newChapters[chapterIndex] = updatedChapter;
+    setProjectData({
+      ...projectData,
+      manuscript: { ...projectData.manuscript, chapters: newChapters }
+    });
+    setShowDeleteModal(false);
+    setPendingDeleteSceneId(null);
+  };
+
+  const cancelDeleteScene = () => {
+    setShowDeleteModal(false);
+    setPendingDeleteSceneId(null);
+  };
+
   const handlePageMouseMove = (e) => {
     if (e.target.classList.contains('lore-link')) {
       const text = e.target.innerText;
@@ -711,21 +903,203 @@ const EditorLayout = () => {
     );
   };
 
+  const [editingSceneId, setEditingSceneId] = useState(null);
+
   if (!chapter) return <div style={{padding: 40}}>No chapters found. Create one in the Binder.</div>;
+
+  // --- SEARCH BAR STATE ---
+  const [showSearchBar, setShowSearchBar] = useState(false);
+  const [searchInput, setSearchInput] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [searchMatches, setSearchMatches] = useState([]);
+  const [currentMatch, setCurrentMatch] = useState(0);
+  const searchInputRef = useRef(null);
+  const editorContentRef = useRef(null);
+  // Toggle search bar with Ctrl+F
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.ctrlKey && e.key === 'f') {
+        e.preventDefault();
+        setShowSearchBar(prev => {
+          const next = !prev;
+          if (!next) {
+            setSearchTerm('');
+            setSearchMatches([]);
+            setCurrentMatch(0);
+            if (editor && editor.state && editor.state.doc) {
+              const { tr, doc, schema } = editor.state;
+              const from = 0;
+              const to = doc.content.size;
+              editor.view.dispatch(tr.removeMark(from, to, schema.marks.searchHighlight));
+            }
+          }
+          return next;
+        });
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [editor]);
+
+  // Focus search input when bar is shown
+  useEffect(() => {
+    if (showSearchBar && searchInputRef.current) {
+      searchInputRef.current.focus();
+    }
+  }, [showSearchBar]);
+
+  // Highlight matches in the editor (exact only, only when searchTerm is set)
+  useEffect(() => {
+    if (!editor) return;
+    // Always remove previous highlights before applying new ones
+    // Remove all highlights from the entire document
+    if (editor && editor.state && editor.state.doc) {
+      const { tr, doc, schema } = editor.state;
+      const from = 0;
+      const to = doc.content.size;
+      editor.view.dispatch(tr.removeMark(from, to, schema.marks.searchHighlight));
+    }
+    if (!searchTerm) {
+      setSearchMatches([]);
+      setCurrentMatch(0);
+      return;
+    }
+    // Find all matches
+    const regex = new RegExp(searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+    const matches = [];
+    editor.state.doc.descendants((node, pos) => {
+      if (node.isText) {
+        let m;
+        while ((m = regex.exec(node.text)) !== null) {
+          matches.push({ from: pos + m.index, to: pos + m.index + m[0].length });
+        }
+      }
+    });
+    setSearchMatches(matches);
+    // Highlight all matches using transaction for exact ranges
+    if (matches.length > 0) {
+      const { state, view, schema } = editor;
+      let tr = state.tr;
+      matches.forEach(({ from, to }) => {
+        tr = tr.addMark(from, to, schema.marks.searchHighlight.create());
+      });
+      view.dispatch(tr);
+    }
+    setCurrentMatch(matches.length > 0 ? 0 : -1);
+  }, [searchTerm, editor, chapter?.id]);
+
+  // Scroll to current match (ProseMirror selection and DOM fallback)
+  useEffect(() => {
+    if (editor && searchMatches.length > 0 && currentMatch >= 0) {
+      const { from } = searchMatches[currentMatch];
+      editor.commands.setTextSelection(from);
+      editor.commands.scrollIntoView();
+      // Fallback: scroll the DOM node for the correct highlight into view
+      setTimeout(() => {
+        const doms = document.querySelectorAll('.search-highlight');
+        if (doms && doms.length > currentMatch) {
+          const dom = doms[currentMatch];
+          if (dom && typeof dom.scrollIntoView === 'function') {
+            dom.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }
+      }, 50);
+    }
+  }, [currentMatch, searchMatches, editor]);
+
+  // Add searchHighlight mark to editor if not present
+  useEffect(() => {
+    if (!editor) return;
+    if (!editor.extensionManager.extensions.some(ext => ext.name === 'searchHighlight')) {
+      editor.registerPlugin({
+        name: 'searchHighlight',
+        addOptions() { return {}; },
+        addGlobalAttributes() { return []; },
+        addProseMirrorPlugins() { return []; },
+        addMark() {
+          return {
+            name: 'searchHighlight',
+            parseDOM: [],
+            toDOM() { return ['mark', { class: 'search-highlight' }, 0]; },
+          };
+        },
+      });
+    }
+  }, [editor]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {hoveredChar && <LoreHoverCard character={hoveredChar} position={mousePos} />}
-      
+
+      {/* SEARCH BAR (toggle with Ctrl+F) */}
+      {showSearchBar && (
+        <div style={{ display: 'flex', alignItems: 'center', padding: '8px 16px', background: 'var(--bg-panel)', borderBottom: '1px solid var(--border)' }}>
+          <input
+            ref={searchInputRef}
+            type="text"
+            value={searchInput}
+            onChange={e => {
+              setSearchInput(e.target.value);
+              setSearchTerm(e.target.value);
+            }}
+            onKeyDown={e => {
+              if (e.key === 'Enter') setSearchTerm(searchInput);
+            }}
+            placeholder="Search in chapter..."
+            style={{ flex: 1, padding: '6px 10px', borderRadius: 4, border: '1px solid var(--border)', fontSize: 15 }}
+          />
+          <button onClick={() => setSearchTerm(searchInput)} style={{ marginLeft: 8 }}>Search</button>
+          <span style={{ marginLeft: 12, fontSize: 13, color: 'var(--text-muted)' }}>
+            {searchTerm && searchMatches.length > 0 ? `${currentMatch + 1} of ${searchMatches.length}` : searchTerm ? 'No matches' : ''}
+          </span>
+          <button
+            onClick={() => {
+              setCurrentMatch(m => Math.max(0, m - 1));
+            }}
+            disabled={currentMatch <= 0}
+            style={{ marginLeft: 8 }}
+          >&uarr;</button>
+          <button
+            onClick={() => {
+              setCurrentMatch(m => Math.min(searchMatches.length - 1, m + 1));
+            }}
+            disabled={currentMatch >= searchMatches.length - 1}
+            style={{ marginLeft: 2 }}
+          >&darr;</button>
+          <button
+            onClick={() => {
+              if (editor && editor.state && editor.state.doc) {
+                const { tr, doc, schema } = editor.state;
+                const from = 0;
+                const to = doc.content.size;
+                editor.view.dispatch(tr.removeMark(from, to, schema.marks.searchHighlight));
+              }
+              setSearchMatches([]);
+              setCurrentMatch(0);
+              setSearchTerm('');
+            }}
+            style={{ marginLeft: 8 }}
+          >
+            Clear
+          </button>
+        </div>
+      )}
+
       <div style={centeredHeaderStyle}>
         <div style={{ flex: 1 }}></div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <EditorToolbar editor={editor} />
-            <TypographyControls /> 
-            <div style={{width: '1px', height: '20px', background: '#555', margin: '0 5px'}}></div>
+            {showToolbar && (
+              <>
+                <EditorToolbar editor={editor} />
+                <TypographyControls />
+                <div style={{width: '1px', height: '20px', background: '#555', margin: '0 5px'}}></div>
+              </>
+            )}
+            <button onClick={() => setShowToolbar(!showToolbar)} style={showToolbar ? activeMagicBtnStyle : magicBtnStyle} title="Toggle Toolbar">🛠️</button>
             <button onClick={() => setIsTypewriterMode(!isTypewriterMode)} style={isTypewriterMode ? activeMagicBtnStyle : magicBtnStyle} title="Typewriter Mode">⌨️</button>
             <button onClick={() => setIsFocusMode(!isFocusMode)} style={isFocusMode ? activeMagicBtnStyle : magicBtnStyle} title="Focus Mode">🎯</button>
             <button onClick={applySmartLinks} style={magicBtnStyle} title="Scan for Lore">🪄 Link Lore</button>
+            <button onClick={removeSmartLinks} style={magicBtnStyle} title="Remove Lore Links">🔓 Unlink Lore</button>
             <button onClick={() => setShowInspector(!showInspector)} style={showInspector ? activeMagicBtnStyle : magicBtnStyle} title="Chapter Inspector">🔎</button>
         </div>
         <div style={rightStatusAreaStyle}>
@@ -734,13 +1108,12 @@ const EditorLayout = () => {
       </div>
 
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-        
         {/* MAIN EDITOR WORKSPACE */}
         <div 
           id="editor-workspace" 
           style={workspaceStyle} 
           className={`${isTypewriterMode ? 'typewriter-active' : ''} ${isFocusMode ? 'focus-mode-active' : ''}`}
-          onContextMenu={handleContextMenu} // Custom menu fallback (native menu in Electron)
+          onContextMenu={handleContextMenu}
         >
           <div style={{
             ...pageContainerStyle,
@@ -758,7 +1131,7 @@ const EditorLayout = () => {
               ...editorWrapperStyle,
               fontSize: `${settings.fontSize}px`,
               fontFamily: settings.fontFamily
-            }}>
+            }} ref={editorContentRef}>
               {editor && <CustomBubbleMenu editor={editor} />}
               <EditorContent editor={editor} />
             </div>
@@ -766,11 +1139,10 @@ const EditorLayout = () => {
         </div>
 
         {showInspector && <ChapterInspector chapterId={chapter.id} />}
-        
       </div>
 
       <EditorFooter editor={editor} />
-      
+
       {/* CONTEXT MENU */}
       {!useNativeContextMenu && contextMenu && (
         <EditorContextMenu 
@@ -817,50 +1189,6 @@ const EditorLayout = () => {
             onClick={handleSaveAndSwitch}
             style={{
               padding: '8px 16px',
-              background: 'var(--accent)',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              fontWeight: 'bold'
-            }}
-          >
-            Save and Switch
-          </button>
-          <button
-            onClick={() => {
-              setAutoSaveEnabled(true);
-              localStorage.setItem('autoSaveEnabled', 'true');
-              handleSaveAndSwitch();
-            }}
-            style={{
-              padding: '8px 16px',
-              background: 'var(--accent)',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer'
-            }}
-          >
-            Enable Auto-Save
-          </button>
-          <button
-            onClick={handleDiscardAndSwitch}
-            style={{
-              padding: '8px 16px',
-              background: 'transparent',
-              color: 'var(--text-muted)',
-              border: '1px solid var(--border)',
-              borderRadius: '4px',
-              cursor: 'pointer'
-            }}
-          >
-            Discard Changes
-          </button>
-          <button
-            onClick={handleCancelSwitch}
-            style={{
-              padding: '8px 16px',
               background: 'transparent',
               color: 'var(--text-muted)',
               border: '1px solid var(--border)',
@@ -872,6 +1200,57 @@ const EditorLayout = () => {
           </button>
         </div>
       </CustomModal>
+
+      {/* ERROR MODAL */}
+      <CustomModal
+        isOpen={errorModal.isOpen}
+        type="confirm"
+        title={errorModal.title}
+        message={errorModal.message}
+        onConfirm={() => setErrorModal({ ...errorModal, isOpen: false })}
+        onCancel={() => setErrorModal({ ...errorModal, isOpen: false })}
+      />
+
+      {/* SCENE CREATION MODAL */}
+      {showSceneModal && (
+        <SceneModal
+          selectedText={sceneSelection.text}
+          onSave={handleSaveScene}
+          onClose={() => setShowSceneModal(false)}
+          sceneId={editingSceneId}
+        />
+      )}
+
+      {/* SCENE DELETE CONFIRM MODAL */}
+      {showDeleteModal && (
+        <CustomModal
+          isOpen={showDeleteModal}
+          type="confirm"
+          title="Delete Scene?"
+          message="Delete this scene? (Text will remain in chapter)"
+          onConfirm={confirmDeleteScene}
+          onCancel={cancelDeleteScene}
+        />
+      )}
+
+      {/* SCENE FOCUS STYLING */}
+      {focusedSceneId && (
+        <style>{`
+          .seymour-editor > *:not(.has-focus) {
+            opacity: 0.2 !important;
+            transition: opacity 0.3s ease;
+          }
+          .seymour-editor .has-focus {
+            opacity: 1 !important;
+            background: rgba(92, 139, 214, 0.08) !important;
+            padding: 15px 10px !important;
+            border-radius: 8px;
+            border-left: 4px solid var(--accent);
+            margin: 5px 0;
+            transition: all 0.3s ease;
+          }
+        `}</style>
+      )}
     </div>
   );
 };
@@ -900,6 +1279,12 @@ styleTag.innerHTML = `
   .focus-mode-active .seymour-editor .has-focus { opacity: 1 !important; }
   .focus-mode-active .ProseMirror-focused .has-focus { opacity: 1 !important; }
   .seymour-editor { outline: none; }
+  .seymour-editor mark.search-highlight {
+    background: yellow;
+    color: black;
+    border-radius: 2px;
+    padding: 0 1px;
+  }
   
   /* Lore link styling */
   .lore-link {
