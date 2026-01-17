@@ -1,5 +1,8 @@
+// ...existing code...
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { DragDropContext, Droppable, Draggable } from 'react-beautiful-dnd';
+import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, DragOverlay } from '@dnd-kit/core';
+import { arrayMove, SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { useSearchParams } from 'react-router-dom';
 import AutoResizeTextarea from '../../components/AutoResizeTextarea';
 import LoreLinkedText from '../../components/LoreLinkedText';
@@ -8,35 +11,20 @@ import { useProject } from '../../context/ProjectContext';
 import CustomModal from '../../components/CustomModal'; 
 import { compressImage } from '../../utils/imageCompression';
 
-// ==========================================
-// PART 1: THE EXPLORER
-// ==========================================
+// --- DatabaseExplorer COMPONENT ---
 const DatabaseExplorer = ({ projectData, setProjectData, saveNowSilently, searchParams, setSearchParams }) => {
+  // --- Folder context from URL params ---
   const currentFolderId = searchParams.get('folderId') || null;
   const folders = projectData.lore.folders || [];
-  const items = projectData.lore.characters || [];
+  const currentFolder = folders.find(f => f.id === currentFolderId) || null;
+  // --- Filter folders/items for current folder ---
   const currentFolders = folders.filter(f => f.parentId === currentFolderId);
-  const currentItems = items.filter(i => i.folderId === currentFolderId);
-  const currentFolder = folders.find(f => f.id === currentFolderId);
-
-  // Folder renaming modal
-  const [renameModal, setRenameModal] = useState({ isOpen: false, folderId: null, name: '' });
-  const openRenameModal = (folder) => setRenameModal({ isOpen: true, folderId: folder.id, name: folder.name });
-  const closeRenameModal = () => setRenameModal({ isOpen: false, folderId: null, name: '' });
-  const handleRenameFolder = (newName) => {
-    if (!newName || !renameModal.folderId) return closeRenameModal();
-    const newFolders = folders.map(f => f.id === renameModal.folderId ? { ...f, name: newName } : f);
-    setProjectData({ ...projectData, lore: { ...projectData.lore, folders: newFolders } });
-    saveNowSilently?.({ ...projectData, lore: { ...projectData.lore, folders: newFolders } });
-    closeRenameModal();
-  };
-
-  // Calculate statistics
-  const stats = React.useMemo(() => {
-    const folderById = new Map(folders.map(f => [f.id, f]));
-
+  const currentItems = (projectData.lore.characters || []).filter(i => (i.folderId || null) === currentFolderId);
+  // --- Stats calculation for banner ---
+  const items = projectData.lore.characters || [];
     const getTopFolder = (folderId) => {
       if (!folderId) return null;
+      const folderById = new Map(folders.map(f => [f.id, f]));
       let current = folderById.get(folderId);
       let safety = 0;
       while (current && current.parentId !== null && safety < 50) {
@@ -45,25 +33,45 @@ const DatabaseExplorer = ({ projectData, setProjectData, saveNowSilently, search
       }
       return current || null;
     };
+    const stats = useMemo(() => {
+      const categoryCounts = {};
+      items.forEach(item => {
+        const top = getTopFolder(item.folderId);
+        const name = top?.name || 'Root';
+        categoryCounts[name] = (categoryCounts[name] || 0) + 1;
+      });
+      const byCategory = Object.entries(categoryCounts)
+        .map(([name, count]) => ({ name, count }))
+        .sort((a, b) => b.count - a.count);
+      return {
+        total: items.length,
+        folders: folders.length,
+        byCategory
+      };
+    }, [items, folders]);
+  // All the logic previously at the top level goes here
+  // ...existing code...
 
-    // Count entries by top-level folder name (Characters / Locations / Magic / etc.)
-    const categoryCounts = {};
-    items.forEach(item => {
-      const top = getTopFolder(item.folderId);
-      const name = top?.name || 'Root';
-      categoryCounts[name] = (categoryCounts[name] || 0) + 1;
+  // --- Folder Rename Modal State/Handlers ---
+  const [renameModal, setRenameModal] = useState({ isOpen: false, name: '', id: null });
+
+  function openRenameModal(folder) {
+    setRenameModal({ isOpen: true, name: folder.name, id: folder.id });
+  }
+
+  function closeRenameModal() {
+    setRenameModal(prev => ({ ...prev, isOpen: false }));
+  }
+
+  function handleRenameFolder(newName) {
+    setProjectData(prev => {
+      const folders = prev.lore.folders.map(f => f.id === renameModal.id ? { ...f, name: newName } : f);
+      const next = { ...prev, lore: { ...prev.lore, folders } };
+      saveNowSilently?.(next);
+      return next;
     });
-
-    const byCategory = Object.entries(categoryCounts)
-      .map(([name, count]) => ({ name, count }))
-      .sort((a, b) => b.count - a.count);
-
-    return {
-      total: items.length,
-      folders: folders.length,
-      byCategory
-    };
-  }, [items, folders]);
+    setRenameModal(prev => ({ ...prev, isOpen: false }));
+  }
 
   const [modal, setModal] = useState({ isOpen: false, type: 'input', title: '', onConfirm: () => {} });
 
@@ -417,6 +425,8 @@ const DatabaseExplorer = ({ projectData, setProjectData, saveNowSilently, search
 // PART 2: THE CHARACTER SHEET
 // ==========================================
 const CharacterSheet = ({ character, projectData, setProjectData, saveNowSilently, charIndex }) => {
+    // Drag-and-drop active block state
+    const [activeBlock, setActiveBlock] = useState(null);
   const [tempImageSrc, setTempImageSrc] = useState(null);
   const [isEditingImage, setIsEditingImage] = useState(false);
   const [modal, setModal] = useState({ isOpen: false, type: 'confirm', title: '', message: '', onConfirm: () => {} });
@@ -606,7 +616,7 @@ const CharacterSheet = ({ character, projectData, setProjectData, saveNowSilentl
   const deleteBlock = (sId, bId) => updateCharacter({ sections: character.sections.map(s => s.id === sId ? { ...s, blocks: s.blocks.filter(b => b.id !== bId) } : s) });
 
   return (
-    <div style={{ padding: '40px', maxWidth: '1200px', margin: '0 auto', paddingBottom: '100px' }}>
+    <div style={{ padding: '40px', maxWidth: '1200px', margin: '0 auto', paddingBottom: '100px', height: 'calc(100vh - 60px)', overflowY: 'auto', boxSizing: 'border-box' }}>
       <CustomModal isOpen={modal.isOpen} type={modal.type} title={modal.title} message={modal.message} onConfirm={modal.onConfirm} onCancel={closeModal} />
       {isEditingImage && <ImageEditorModal imageSrc={tempImageSrc} onSave={handleSaveImage} onCancel={() => setIsEditingImage(false)} />}
       
@@ -842,43 +852,75 @@ const CharacterSheet = ({ character, projectData, setProjectData, saveNowSilentl
         </div>
       </div>
 
-      {/* SECTIONS */}
-      <DragDropContext
-        onDragEnd={(result) => {
-          const { source, destination } = result;
-          if (!destination) return;
-          if (
-            source.droppableId === destination.droppableId &&
-            source.index === destination.index
-          ) {
+      {/* SECTIONS (dnd-kit) */}
+      <DndContext
+        sensors={useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 2 } }))}
+        collisionDetection={closestCenter}
+        onDragStart={({ active }) => {
+          // Find the block being dragged
+          let found = null;
+          (character.sections || []).forEach(section => {
+            const block = (section.blocks || []).find(b => String(b.id) === String(active.id));
+            if (block) found = { ...block };
+          });
+          setActiveBlock(found);
+        }}
+        onDragEnd={({ active, over }) => {
+          setActiveBlock(null);
+          if (!over || active.id === over.id) return;
+          // Find the source section and block
+          let fromSectionIdx = -1;
+          let fromBlockIdx = -1;
+          character.sections.forEach((section, sIdx) => {
+            const idx = (section.blocks || []).findIndex(b => String(b.id) === String(active.id));
+            if (idx !== -1) {
+              fromSectionIdx = sIdx;
+              fromBlockIdx = idx;
+            }
+          });
+          if (fromSectionIdx === -1 || fromBlockIdx === -1) return;
+          // Find the destination section and block
+          let toSectionIdx = -1;
+          let toBlockIdx = -1;
+          character.sections.forEach((section, sIdx) => {
+            const idx = (section.blocks || []).findIndex(b => String(b.id) === String(over.id));
+            if (idx !== -1) {
+              toSectionIdx = sIdx;
+              toBlockIdx = idx;
+            }
+          });
+          // If dropped on empty section, allow drop at end
+          if (toSectionIdx === -1) {
+            // Check if over.id is a section id (for empty section drop zones)
+            toSectionIdx = character.sections.findIndex(s => String(s.id) === String(over.id));
+            toBlockIdx = 0;
+            if (toSectionIdx === -1) return;
+          }
+          // If same section, just reorder
+          if (fromSectionIdx === toSectionIdx) {
+            const section = character.sections[fromSectionIdx];
+            const newBlocks = arrayMove(section.blocks, fromBlockIdx, toBlockIdx);
+            const newSections = character.sections.map((s, idx) => idx === fromSectionIdx ? { ...s, blocks: newBlocks } : s);
+            updateCharacter({ sections: newSections });
             return;
           }
-          const sourceSectionIdx = character.sections.findIndex(s => s.id.toString() === source.droppableId);
-          const destSectionIdx = character.sections.findIndex(s => s.id.toString() === destination.droppableId);
-          if (sourceSectionIdx === -1 || destSectionIdx === -1) return;
-          const sourceSection = character.sections[sourceSectionIdx];
-          const destSection = character.sections[destSectionIdx];
-          const movingBlock = sourceSection.blocks[source.index];
-
-          // Remove from source section
-          const newSourceBlocks = Array.from(sourceSection.blocks);
-          newSourceBlocks.splice(source.index, 1);
-
-          // Insert into destination section
-          const newDestBlocks = Array.from(destSection.blocks);
-          newDestBlocks.splice(destination.index, 0, movingBlock);
-
-          const newSections = character.sections.map((section, idx) => {
-            if (idx === sourceSectionIdx && idx === destSectionIdx) {
-              // Same section, just reordering
-              return { ...section, blocks: newDestBlocks };
-            } else if (idx === sourceSectionIdx) {
-              return { ...section, blocks: newSourceBlocks };
-            } else if (idx === destSectionIdx) {
-              return { ...section, blocks: newDestBlocks };
-            } else {
-              return section;
-            }
+          // Move block between sections
+          const fromSection = character.sections[fromSectionIdx];
+          const toSection = character.sections[toSectionIdx];
+          const movingBlock = fromSection.blocks[fromBlockIdx];
+          // Remove from old section
+          const newFromBlocks = fromSection.blocks.filter((_, idx) => idx !== fromBlockIdx);
+          // Insert into new section at correct position
+          const newToBlocks = [...toSection.blocks];
+          if (typeof toBlockIdx === 'number') {
+            newToBlocks.splice(toBlockIdx, 0, movingBlock);
+          } else {
+            newToBlocks.push(movingBlock);
+          }
+          const newSections = character.sections.map((s, idx) => {
+            if (idx === fromSectionIdx) return { ...s, blocks: newFromBlocks };
+            if (idx === toSectionIdx) return { ...s, blocks: newToBlocks };
+            return s;
           });
           updateCharacter({ sections: newSections });
         }}
@@ -889,66 +931,53 @@ const CharacterSheet = ({ character, projectData, setProjectData, saveNowSilentl
               <input type="text" value={section.title} onChange={(e) => updateSectionTitle(section.id, e.target.value)} style={sectionTitleStyle} />
               <button onClick={() => deleteSection(section.id)} style={deleteBtnStyle}>Delete Section</button>
             </div>
-            <Droppable droppableId={section.id.toString()} direction="vertical">
-              {(provided, snapshot) => (
-                <div
-                  ref={provided.innerRef}
-                  {...provided.droppableProps}
-                  style={{ ...gridStyle, background: snapshot.isDraggingOver ? 'var(--bg-header)' : undefined }}
-                >
-                  {(section.blocks || []).map((block, idx) => (
-                    <Draggable key={String(block.id)} draggableId={String(block.id)} index={idx}>
-                      {(provided, snapshot) => (
-                        <div
-                          ref={provided.innerRef}
-                          {...provided.draggableProps}
-                          style={{
-                            ...blockStyle,
-                            ...provided.draggableProps.style,
-                            boxShadow: snapshot.isDragging ? '0 4px 16px rgba(0,0,0,0.15)' : blockStyle.boxShadow,
-                          }}
-                        >
-                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px', alignItems: 'center' }}>
-                            <span
-                              {...provided.dragHandleProps}
-                              style={{
-                                background: 'none',
-                                border: 'none',
-                                cursor: snapshot.isDragging ? 'grabbing' : 'grab',
-                                fontSize: '16px',
-                                marginRight: '8px',
-                                color: '#aaa',
-                                padding: 0,
-                                lineHeight: 1,
-                                display: 'flex',
-                                alignItems: 'center',
-                                outline: 'none',
-                              }}
-                              title="Drag to move"
-                            >
-                              <span style={{fontSize: '18px'}}>≡</span>
-                            </span>
-                            <input type="text" value={block.label} onChange={(e) => updateBlock(section.id, block.id, 'label', e.target.value)} style={labelInputStyle} />
-                            <button onClick={() => deleteBlock(section.id, block.id)} style={xBtnStyle}>✕</button>
-                          </div>
-                          <div style={contentBoxStyle}><LoreLinkedText value={block.content} onChange={(val) => updateBlock(section.id, block.id, 'content', val)} manualLinks={manualLinks} /></div>
-                        </div>
-                      )}
-                    </Draggable>
-                  ))}
-                  {provided.placeholder}
-                  {(!section.blocks || section.blocks.length === 0) && (
-                    <div style={{ minHeight: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: '12px', border: '1px dashed var(--border)', borderRadius: '4px', marginBottom: '10px' }}>
-                      Drop a field here
-                    </div>
-                  )}
-                  <button onClick={() => addBlock(section.id)} style={addBlockBtnStyle}>+ Add Field</button>
-                </div>
-              )}
-            </Droppable>
+            <SortableContext items={((section.blocks || []).length > 0 ? (section.blocks || []).map(b => String(b.id)) : [String(section.id)])} strategy={verticalListSortingStrategy}>
+              <div style={gridStyle}>
+                {(section.blocks || []).map((block, idx) => (
+                  <SortableBlock
+                    key={block.id}
+                    block={block}
+                    sectionId={section.id}
+                    updateBlock={updateBlock}
+                    deleteBlock={deleteBlock}
+                    manualLinks={manualLinks}
+                  />
+                ))}
+                {(!section.blocks || section.blocks.length === 0) && (
+                  <div
+                    style={{ minHeight: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: '12px', border: '1px dashed var(--border)', borderRadius: '4px', marginBottom: '10px' }}
+                    data-id={section.id}
+                  >
+                    Drop a field here
+                  </div>
+                )}
+                <button onClick={() => addBlock(section.id)} style={addBlockBtnStyle}>+ Add Field</button>
+              </div>
+            </SortableContext>
           </div>
         ))}
-      </DragDropContext>
+        <DragOverlay dropAnimation={{ duration: 200, easing: 'cubic-bezier(0.18,0.67,0.6,1.22)' }}>
+          {activeBlock ? (
+            <div style={{
+              ...blockStyle,
+              background: 'var(--bg-panel)',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.25)',
+              opacity: 0.95,
+              pointerEvents: 'none',
+              transform: 'scale(1.04)',
+              transition: 'box-shadow 0.2s, transform 0.2s',
+              zIndex: 9999,
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px', alignItems: 'center' }}>
+                <span style={{ fontSize: '18px', color: '#aaa', marginRight: '8px' }}>≡</span>
+                <input type="text" value={activeBlock.label} readOnly style={labelInputStyle} />
+                <button style={xBtnStyle} disabled>✕</button>
+              </div>
+              <div style={contentBoxStyle}><LoreLinkedText value={activeBlock.content} onChange={() => {}} manualLinks={[]} /></div>
+            </div>
+          ) : null}
+        </DragOverlay>
+      </DndContext>
       <button onClick={addSection} style={addSectionBtnStyle}>+ Create New Section</button>
     </div>
   );
@@ -1011,5 +1040,48 @@ const explorerStyle = `.explorer-card:hover { transform: translateY(-3px); box-s
 const styleTag = document.createElement("style");
 styleTag.innerHTML = explorerStyle;
 document.head.appendChild(styleTag);
+
+
+// ...existing code...
+// --- SortableBlock COMPONENT (for dnd-kit sortable blocks) ---
+function SortableBlock({ block, sectionId, updateBlock, deleteBlock, manualLinks }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: String(block.id) });
+  const style = {
+    ...blockStyle,
+    transform: CSS.Transform.toString(transform),
+    transition: 'box-shadow 0.2s, transform 0.2s',
+    boxShadow: isDragging ? '0 8px 32px rgba(0,0,0,0.25)' : blockStyle.boxShadow,
+    opacity: isDragging ? 0.85 : 1,
+    zIndex: isDragging ? 1000 : 'auto',
+  };
+  return (
+    <div ref={setNodeRef} style={style} {...attributes}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px', alignItems: 'center' }}>
+        <span
+          {...listeners}
+          style={{
+            background: 'none',
+            border: 'none',
+            cursor: isDragging ? 'grabbing' : 'grab',
+            fontSize: '16px',
+            marginRight: '8px',
+            color: '#aaa',
+            padding: 0,
+            lineHeight: 1,
+            display: 'flex',
+            alignItems: 'center',
+            outline: 'none',
+          }}
+          title="Drag to move"
+        >
+          <span style={{ fontSize: '18px' }}>≡</span>
+        </span>
+        <input type="text" value={block.label} onChange={(e) => updateBlock(sectionId, block.id, 'label', e.target.value)} style={labelInputStyle} />
+        <button onClick={() => deleteBlock(sectionId, block.id)} style={xBtnStyle}>✕</button>
+      </div>
+      <div style={contentBoxStyle}><LoreLinkedText value={block.content} onChange={(val) => updateBlock(sectionId, block.id, 'content', val)} manualLinks={manualLinks} /></div>
+    </div>
+  );
+}
 
 export default LoreCard;
