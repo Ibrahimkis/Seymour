@@ -2,10 +2,24 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useProject } from '../context/ProjectContext';
 import CustomModal from './CustomModal';
-import Wordsmith from '../features/tools/Wordsmith'; 
+import Wordsmith from '../features/tools/Wordsmith';
 
 // --- RECURSIVE FOLDER COMPONENT ---
-const FolderNode = ({ folder, allFolders, allItems, level, onToggle, onCreateFolder, onCreateItem, onNavigate, onDeleteFolder, onMoveItem, onDeleteItem, onReorderFolders }) => {
+const FolderNode = ({ folder, allFolders, allItems, level, onToggle, onCreateFolder, onCreateItem, onNavigate, onDeleteFolder, onMoveItem, onDeleteItem, onReorderFolders, onRenameFolder }) => {
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState(folder.name);
+  const handleRename = (e) => {
+    e.stopPropagation();
+    setIsRenaming(true);
+    setRenameValue(folder.name);
+  };
+  const handleRenameSubmit = (e) => {
+    e.preventDefault();
+    if (renameValue.trim() && renameValue !== folder.name) {
+      onRenameFolder(folder.id, renameValue.trim());
+    }
+    setIsRenaming(false);
+  };
   const childFolders = allFolders.filter(f => f.parentId === folder.id);
   const childItems = allItems.filter(i => i.folderId === folder.id);
   const isOpen = folder.isOpen;
@@ -47,15 +61,29 @@ const FolderNode = ({ folder, allFolders, allItems, level, onToggle, onCreateFol
           style={{ display: 'flex', alignItems: 'center', gap: '5px', flex: 1, cursor: 'pointer', overflow: 'hidden', minWidth: 0 }}
         >
           <span style={{ fontSize: '10px', color: 'var(--text-muted)', flexShrink: 0 }}>{isOpen ? '▼' : '▶'}</span>
-          <span style={{ fontWeight: 'bold', color: 'var(--accent)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>📁 {folder.name}</span>
+          {isRenaming ? (
+            <form onSubmit={handleRenameSubmit} style={{ flex: 1 }}>
+              <input
+                type="text"
+                value={renameValue}
+                autoFocus
+                onChange={e => setRenameValue(e.target.value)}
+                onBlur={handleRenameSubmit}
+                style={{ fontWeight: 'bold', color: 'var(--accent)', background: 'var(--bg-panel)', border: '1px solid var(--accent)', borderRadius: '4px', padding: '2px 6px', width: '80%' }}
+              />
+            </form>
+          ) : (
+            <span style={{ fontWeight: 'bold', color: 'var(--accent)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>📁 {folder.name}</span>
+          )}
         </div>
 
         {/* RIGHT: ACTION BUTTONS (Visible on Hover) */}
-        <div className="folder-actions" style={{ display: 'flex', gap: '2px', marginLeft: '5px' }}>
+           <div className="folder-actions" style={{ display: 'flex', gap: '2px', marginLeft: '5px' }}>
+             <button onClick={handleRename} className="icon-btn" title="Rename Folder">✎</button>
              <button onClick={(e) => { e.stopPropagation(); onCreateFolder(folder.id); }} className="icon-btn" title="New Subfolder">+📂</button>
              <button onClick={(e) => { e.stopPropagation(); onCreateItem(folder.id); }} className="icon-btn" title="New Item">+📄</button>
              <button onClick={(e) => { e.stopPropagation(); onDeleteFolder(folder.id); }} className="icon-btn delete-btn" title="Delete">×</button>
-        </div>
+           </div>
       </div>
 
       {/* CHILDREN */}
@@ -151,6 +179,14 @@ const RightPanel = () => {
   // Actions
   const updateLore = (updates) => { setProjectData({ ...projectData, lore: { ...projectData.lore, ...updates } }); };
   const closeModal = () => setModal({ ...modal, isOpen: false });
+
+  // Folder rename handler (must be outside JSX)
+  const handleRenameFolder = (folderId, newName) => {
+    if (!newName) return;
+    const newFolders = (projectData.lore.folders || []).map(f => f.id === folderId ? { ...f, name: newName } : f);
+    updateLore({ folders: newFolders });
+    saveNowSilently?.({ ...projectData, lore: { ...projectData.lore, folders: newFolders } });
+  };
 
   const toggleFolder = (folderId) => {
     const newFolders = projectData.lore.folders.map(f => f.id === folderId ? { ...f, isOpen: !f.isOpen } : f);
@@ -295,7 +331,24 @@ const RightPanel = () => {
                   ))}
                 </div>
               ) : (
-                rootFolders.map(folder => ( <FolderNode key={folder.id} folder={folder} allFolders={folders} allItems={items} level={0} onToggle={toggleFolder} onCreateFolder={createFolder} onCreateItem={createItem} onNavigate={(id) => checkAndNavigate(`/lore?id=${id}`)} onDeleteFolder={deleteFolder} onMoveItem={handleMoveItem} onDeleteItem={handleDeleteItem} onReorderFolders={handleReorderFolders} /> ))
+                rootFolders.map(folder => (
+                  <FolderNode
+                    key={folder.id}
+                    folder={folder}
+                    allFolders={folders}
+                    allItems={items}
+                    level={0}
+                    onToggle={toggleFolder}
+                    onCreateFolder={createFolder}
+                    onCreateItem={createItem}
+                    onNavigate={(id) => checkAndNavigate(`/lore?id=${id}`)}
+                    onDeleteFolder={deleteFolder}
+                    onMoveItem={handleMoveItem}
+                    onDeleteItem={handleDeleteItem}
+                    onReorderFolders={handleReorderFolders}
+                    onRenameFolder={handleRenameFolder}
+                  />
+                ))
               )}
             </div>
           </>

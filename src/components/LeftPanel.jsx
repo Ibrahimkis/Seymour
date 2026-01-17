@@ -121,24 +121,26 @@ const LeftPanel = () => {
     // 2. Remove from Data
     const newChapters = chapters.filter(c => c.id !== id);
     setProjectData({ 
-        ...projectData, 
-        manuscript: { ...projectData.manuscript, chapters: newChapters } 
+      ...projectData, 
+      manuscript: { ...projectData.manuscript, chapters: newChapters } 
     });
 
     // 3. UI Feedback
     closeModal();
     setShowToast(true);
 
-    // 4. Redirect if we were looking at that chapter
-    if (location.search.includes(id)) {
-        navigate('/editor');
+    // 4. Redirect if we were looking at that chapter or if no chapters remain
+    if (newChapters.length === 0) {
+      navigate('/lore'); // World Database
+    } else if (location.search.includes(id)) {
+      navigate('/editor');
     }
 
     // 5. Timer to clear Undo
     setTimeout(() => {
-        setShowToast(false);
+      setShowToast(false);
     }, 15000);
-  };
+    };
 
   // --- UNDO LOGIC ---
   const handleUndo = () => {

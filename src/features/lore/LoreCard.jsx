@@ -19,6 +19,18 @@ const DatabaseExplorer = ({ projectData, setProjectData, saveNowSilently, search
   const currentItems = items.filter(i => i.folderId === currentFolderId);
   const currentFolder = folders.find(f => f.id === currentFolderId);
 
+  // Folder renaming modal
+  const [renameModal, setRenameModal] = useState({ isOpen: false, folderId: null, name: '' });
+  const openRenameModal = (folder) => setRenameModal({ isOpen: true, folderId: folder.id, name: folder.name });
+  const closeRenameModal = () => setRenameModal({ isOpen: false, folderId: null, name: '' });
+  const handleRenameFolder = (newName) => {
+    if (!newName || !renameModal.folderId) return closeRenameModal();
+    const newFolders = folders.map(f => f.id === renameModal.folderId ? { ...f, name: newName } : f);
+    setProjectData({ ...projectData, lore: { ...projectData.lore, folders: newFolders } });
+    saveNowSilently?.({ ...projectData, lore: { ...projectData.lore, folders: newFolders } });
+    closeRenameModal();
+  };
+
   // Calculate statistics
   const stats = React.useMemo(() => {
     const folderById = new Map(folders.map(f => [f.id, f]));
@@ -274,6 +286,15 @@ const DatabaseExplorer = ({ projectData, setProjectData, saveNowSilently, search
   return (
     <div style={{ padding: '40px', maxWidth: '1200px', margin: '0 auto' }}>
       <CustomModal isOpen={modal.isOpen} type={modal.type} title={modal.title} onConfirm={modal.onConfirm} onCancel={() => setModal({...modal, isOpen: false})} />
+      {/* Folder Rename Modal */}
+      <CustomModal
+        isOpen={renameModal.isOpen}
+        type="input"
+        title="Rename Folder"
+        defaultValue={renameModal.name}
+        onConfirm={handleRenameFolder}
+        onCancel={closeRenameModal}
+      />
 
       <input
         ref={importInputRef}
@@ -366,6 +387,7 @@ const DatabaseExplorer = ({ projectData, setProjectData, saveNowSilently, search
               <div style={{ fontSize: '40px', marginBottom: '10px' }}>📁</div>
               <div style={cardNameStyle}>{folder.name}</div>
               <div style={cardMetaStyle}>Folder</div>
+              <div style={{position: 'absolute', top: 5, right: 35, cursor: 'pointer', color: '#666'}} onClick={(e) => { e.stopPropagation(); openRenameModal(folder); }} title="Rename">✎</div>
               <div style={{position: 'absolute', top: 5, right: 5, cursor: 'pointer', color: '#666'}} onClick={(e) => { e.stopPropagation(); deleteItem(folder.id, 'folder'); }}>✕</div>
             </div>
           ))}
